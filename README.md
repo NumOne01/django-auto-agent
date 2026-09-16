@@ -7,12 +7,19 @@ Import name: `ai_agent`.
 ## Install
 
 ```bash
-pip install -e .
+pip install django-auto-agent
 ```
 
 Redis-backed memory store (optional):
 
 ```bash
+pip install "django-auto-agent[redis]"
+```
+
+From a clone of this repository:
+
+```bash
+pip install -e .
 pip install -e ".[redis]"
 ```
 

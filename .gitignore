@@ -8,3 +8,4 @@ build/
 .venv/
 venv/
 .DS_Store
+CODE_REVIEW.md

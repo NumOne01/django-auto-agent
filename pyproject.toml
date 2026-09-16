@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,30 @@ name = "django-auto-agent"
 version = "0.1.0"
 description = "Django reusable app: DRF-to-LangGraph agent bridge with long-term memory."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+authors = [
+    { name = "Alireza fz" },
+]
+keywords = ["django", "djangorestframework", "langgraph", "agent", "copilotkit"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 4.2",
+    "Framework :: Django :: 5.0",
+    "Framework :: Django :: 5.1",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+]
 dependencies = [
     "Django>=4.2",
     "djangorestframework",
@@ -29,6 +52,11 @@ redis = [
     "redis>=5.0.0",
     "langgraph-checkpoint-redis",
 ]
+
+[project.urls]
+Homepage = "https://github.com/alirezafz/django-auto-agent"
+Repository = "https://github.com/alirezafz/django-auto-agent"
+Issues = "https://github.com/alirezafz/django-auto-agent/issues"
 
 [tool.setuptools]
 include-package-data = true
