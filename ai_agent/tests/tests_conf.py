@@ -38,6 +38,7 @@ class AgentSettingsFactoryTests(SimpleTestCase):
         self.assertEqual(parsed.memory_embeddings, "")
         self.assertEqual(parsed.authenticate_token, "")
         self.assertEqual(parsed.middleware, ())
+        self.assertEqual(parsed.extra_agents, ())
 
     def test_platform_defaults_when_omitted(self):
         parsed = get_agent_settings(raw={"SUPERVISOR_MODEL": "openai:x"})
@@ -172,6 +173,24 @@ class MiddlewareSettingsTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured) as caught:
             resolve_agent_middleware(raw={"MIDDLEWARE": ["ai_agent.tests.missing.Nope"]})
         self.assertIn("MIDDLEWARE", str(caught.exception))
+
+
+class ExtraAgentsSettingsTests(SimpleTestCase):
+    def test_empty_default(self):
+        parsed = get_agent_settings(raw={})
+        self.assertEqual(parsed.extra_agents, ())
+
+    def test_comma_separated_paths(self):
+        parsed = get_agent_settings(
+            raw={"EXTRA_AGENTS": "dummy.agents.CatalogSearchAgent"}
+        )
+        self.assertEqual(parsed.extra_agents, ("dummy.agents.CatalogSearchAgent",))
+
+    def test_list_of_paths(self):
+        parsed = get_agent_settings(
+            raw={"EXTRA_AGENTS": ["dummy.agents.CatalogSearchAgent"]}
+        )
+        self.assertEqual(parsed.extra_agents, ("dummy.agents.CatalogSearchAgent",))
 
 
 class StudioDjangoSettingsTests(SimpleTestCase):

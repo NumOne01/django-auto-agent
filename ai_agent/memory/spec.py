@@ -43,12 +43,29 @@ def resolve_memory_spec(layer: str) -> MemorySpec:
         episode = _resolve_model(
             getattr(config, "agent_memory_episode", None), episode
         )
+    extra = _model_agent_for_layer(layer)
+    if extra is not None:
+        profile = _resolve_model(getattr(extra, "memory_profile", None), profile)
+        raw_collections = getattr(extra, "memory_collections", None)
+        if raw_collections:
+            resolved = tuple(
+                _resolve_model(item, SemanticFact) for item in raw_collections
+            )
+            if resolved:
+                collections = resolved
+        episode = _resolve_model(getattr(extra, "memory_episode", None), episode)
     return MemorySpec(
         layer=layer,
         profile=profile,
         collections=collections,
         episode=episode,
     )
+
+
+def _model_agent_for_layer(layer: str):
+    from ai_agent.agents import model_agent_for_layer
+
+    return model_agent_for_layer(layer)
 
 
 def _resolve_model(value, default: type[BaseModel]) -> type[BaseModel]:

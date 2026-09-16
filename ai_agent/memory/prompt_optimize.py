@@ -947,19 +947,27 @@ def _unknown_tool_names(text: str, layer: str) -> set[str]:
 
 def _known_tool_names(layer: str) -> set[str]:
     try:
+        from ai_agent.agents import model_agent_for_layer, resolve_model_agents
         from ai_agent.graph import subagent_tool_name
         from ai_agent.tools import tools_by_app
 
         grouped = tools_by_app()
+        extra_agents = resolve_model_agents(check_endpoint_collisions=False)
     except Exception:
         return set()
     names: set[str] = set()
     if layer == SUPERVISOR_LAYER:
         for app_label in grouped:
             names.add(subagent_tool_name(app_label))
+        for agent in extra_agents:
+            names.add(subagent_tool_name(agent.validated_name()))
         return names
     for tool in grouped.get(layer) or []:
         names.add(tool.name)
+    extra = model_agent_for_layer(layer)
+    if extra is not None:
+        for spec in extra.tool_specs():
+            names.add(spec.name)
     return names
 
 

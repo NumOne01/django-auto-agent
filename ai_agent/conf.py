@@ -87,6 +87,7 @@ class AgentSettings:
     authenticate_token: object
     eval_module: str
     middleware: tuple
+    extra_agents: tuple
     platform: PlatformConfig
 
     def is_memory_hot(self) -> bool:
@@ -191,6 +192,7 @@ def get_agent_settings(*, raw: dict | None = None) -> AgentSettings:
         authenticate_token=_as_authenticate_token(raw.get("AUTHENTICATE_TOKEN")),
         eval_module=str(raw.get("EVAL_MODULE") or "").strip(),
         middleware=_as_middleware_tuple(raw.get("MIDDLEWARE")),
+        extra_agents=_as_middleware_tuple(raw.get("EXTRA_AGENTS")),
         platform=_platform_config(raw),
     )
 

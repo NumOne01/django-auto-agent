@@ -24,13 +24,24 @@ _LIST_INDEX_MAX = 12
 
 
 def routing_targets(app_label: str) -> set[str]:
-    if not any(item.app_label == app_label for item in discover_endpoints()):
-        return set()
-    return {subagent_tool_name(app_label)}
+    if any(item.app_label == app_label for item in discover_endpoints()):
+        return {subagent_tool_name(app_label)}
+    from ai_agent.agents import model_agent_for_layer
+
+    if model_agent_for_layer(app_label) is not None:
+        return {subagent_tool_name(app_label)}
+    return set()
 
 
 def mutation_tool_names() -> set[str]:
-    return {item.operation_id for item in discover_endpoints() if item.confirm}
+    names = {item.operation_id for item in discover_endpoints() if item.confirm}
+    from ai_agent.agents import resolve_model_agents
+
+    for agent in resolve_model_agents(check_endpoint_collisions=False):
+        for spec in agent.tool_specs():
+            if spec.confirm:
+                names.add(spec.name)
+    return names
 
 
 def tool_to_domain() -> dict[str, str]:
@@ -41,6 +52,13 @@ def tool_to_domain() -> dict[str, str]:
         mapping[item.operation_id] = item.app_label
     for app_label in grouped:
         mapping[subagent_tool_name(app_label)] = app_label
+    from ai_agent.agents import resolve_model_agents
+
+    for agent in resolve_model_agents(check_endpoint_collisions=False):
+        label = agent.validated_name()
+        mapping[subagent_tool_name(label)] = label
+        for spec in agent.tool_specs():
+            mapping[spec.name] = label
     return mapping
 
 

@@ -1,4 +1,4 @@
-"""Supervisor + per-app LangGraph subagents built from discovered API tools."""
+"""Supervisor + per-app LangGraph subagents from API tools and ModelAgents."""
 
 from __future__ import annotations
 
@@ -52,6 +52,7 @@ def build_supervisor(
     supervisor_model: Optional[str] = None,
     subagent_model: Optional[str] = None,
     extra_middleware: Optional[Sequence] = None,
+    extra_agents: Optional[Sequence] = None,
     stub_subagents: bool = False,
     wrap_subagent: Optional[WrapSubagent] = None,
     agent_runtime=None,
@@ -59,13 +60,15 @@ def build_supervisor(
     agent_settings = _resolve_settings(settings, agent_runtime)
     supervisor_model = supervisor_model or model or agent_settings.supervisor_model
     subagent_model = subagent_model or model or agent_settings.subagent_model
-    grouped_endpoints = _endpoints_by_app(
-        _resolve_endpoints(endpoints, agent_runtime)
-    )
+    resolved_endpoints = _resolve_endpoints(endpoints, agent_runtime)
+    grouped_endpoints = _endpoints_by_app(resolved_endpoints)
     wrap = wrap_subagent or _wrap_subagent
     resolved_store = _bound_store(store, agent_settings)
     extra = extra_middleware or (
         agent_runtime.extra_middleware if agent_runtime is not None else None
+    )
+    model_agents = _resolve_model_agents(
+        extra_agents, agent_runtime, agent_settings, resolved_endpoints
     )
 
     supervisor_tools: list[StructuredTool] = []
@@ -74,31 +77,43 @@ def build_supervisor(
     for app_label, app_endpoints in grouped_endpoints.items():
         app_tools = [build_tool(endpoint) for endpoint in app_endpoints]
         blurb = _app_description(app_label)
-        if stub_subagents:
-            supervisor_tools.append(_stub_subagent(app_label, blurb))
-        else:
-            subagent = _create_domain_agent(
-                app_label,
-                blurb,
-                app_tools,
-                model=subagent_model,
-                middleware=_agent_middleware(
-                    extra,
-                    layer=app_label,
-                    settings=agent_settings,
-                    agent_runtime=agent_runtime,
-                ),
-                checkpointer=checkpointer,
-                store=resolved_store,
-                settings=agent_settings,
-            )
-            supervisor_tools.append(wrap(app_label, blurb, subagent))
-        domain_lines.append(
-            f"- {subagent_tool_name(app_label)}: {blurb} Delegate {app_label} tasks here."
+        _append_specialist(
+            app_label,
+            blurb,
+            app_tools,
+            supervisor_tools=supervisor_tools,
+            domain_lines=domain_lines,
+            stub_subagents=stub_subagents,
+            wrap=wrap,
+            subagent_model=subagent_model,
+            extra=extra,
+            checkpointer=checkpointer,
+            store=resolved_store,
+            settings=agent_settings,
+            agent_runtime=agent_runtime,
+        )
+
+    for agent in model_agents:
+        label = agent.validated_name()
+        blurb = agent.validated_description()
+        _append_specialist(
+            label,
+            blurb,
+            agent.build_tools(),
+            supervisor_tools=supervisor_tools,
+            domain_lines=domain_lines,
+            stub_subagents=stub_subagents,
+            wrap=wrap,
+            subagent_model=subagent_model,
+            extra=extra,
+            checkpointer=checkpointer,
+            store=resolved_store,
+            settings=agent_settings,
+            agent_runtime=agent_runtime,
         )
 
     if not supervisor_tools:
-        raise RuntimeError("No API endpoints are exposed to the AI agent")
+        raise RuntimeError("No specialists are registered with the AI agent")
 
     if agent_settings.is_memory_hot():
         supervisor_tools.extend(_memory_tools("supervisor"))
@@ -126,40 +141,60 @@ def build_domain_agent(
     *,
     settings: Optional[AgentSettings] = None,
     endpoints: Optional[Sequence] = None,
+    extra_agents: Optional[Sequence] = None,
     model: Optional[str] = None,
     extra_middleware: Optional[Sequence] = None,
     checkpointer=None,
     store=None,
     agent_runtime=None,
 ):
-    """Compiled specialist for one Django app's exposed API tools."""
+    """Compiled specialist for one Django app or ModelAgent label."""
     agent_settings = _resolve_settings(settings, agent_runtime)
     extra = extra_middleware or (
         agent_runtime.extra_middleware if agent_runtime is not None else None
     )
-    app_endpoints = _endpoints_by_app(
-        _resolve_endpoints(endpoints, agent_runtime)
-    ).get(app_label) or []
-    if not app_endpoints:
-        raise LookupError(f"No AI agent endpoints for app {app_label!r}")
-    app_tools = [build_tool(endpoint) for endpoint in app_endpoints]
-    blurb = _app_description(app_label)
+    resolved_endpoints = _resolve_endpoints(endpoints, agent_runtime)
+    app_endpoints = _endpoints_by_app(resolved_endpoints).get(app_label) or []
     model = model or agent_settings.subagent_model
-    return _create_domain_agent(
-        app_label,
-        blurb,
-        app_tools,
-        model=model,
-        middleware=_agent_middleware(
-            extra,
-            layer=app_label,
+    if app_endpoints:
+        app_tools = [build_tool(endpoint) for endpoint in app_endpoints]
+        blurb = _app_description(app_label)
+        return _create_domain_agent(
+            app_label,
+            blurb,
+            app_tools,
+            model=model,
+            middleware=_agent_middleware(
+                extra,
+                layer=app_label,
+                settings=agent_settings,
+                agent_runtime=agent_runtime,
+            ),
+            checkpointer=checkpointer,
+            store=_bound_store(store, agent_settings),
             settings=agent_settings,
-            agent_runtime=agent_runtime,
-        ),
-        checkpointer=checkpointer,
-        store=_bound_store(store, agent_settings),
-        settings=agent_settings,
+        )
+    model_agents = _resolve_model_agents(
+        extra_agents, agent_runtime, agent_settings, resolved_endpoints
     )
+    for agent in model_agents:
+        if agent.validated_name() == app_label:
+            return _create_domain_agent(
+                agent.validated_name(),
+                agent.validated_description(),
+                agent.build_tools(),
+                model=model,
+                middleware=_agent_middleware(
+                    extra,
+                    layer=app_label,
+                    settings=agent_settings,
+                    agent_runtime=agent_runtime,
+                ),
+                checkpointer=checkpointer,
+                store=_bound_store(store, agent_settings),
+                settings=agent_settings,
+            )
+    raise LookupError(f"No AI agent specialist for {app_label!r}")
 
 
 def subagent_tool_name(app_label: str) -> str:
@@ -180,6 +215,60 @@ def _resolve_endpoints(endpoints, agent_runtime) -> Sequence:
     if agent_runtime is not None:
         return agent_runtime.endpoints
     return discover_endpoints()
+
+
+def _resolve_model_agents(extra_agents, agent_runtime, agent_settings, endpoints):
+    from ai_agent.agents import resolve_model_agents
+
+    if extra_agents is not None:
+        return resolve_model_agents(
+            settings=agent_settings,
+            extra_agents=extra_agents,
+            endpoints=endpoints,
+        )
+    if agent_runtime is not None:
+        return list(agent_runtime.extra_agents)
+    return resolve_model_agents(settings=agent_settings, endpoints=endpoints)
+
+
+def _append_specialist(
+    label: str,
+    blurb: str,
+    tools: list[StructuredTool],
+    *,
+    supervisor_tools: list[StructuredTool],
+    domain_lines: list[str],
+    stub_subagents: bool,
+    wrap: WrapSubagent,
+    subagent_model,
+    extra,
+    checkpointer,
+    store,
+    settings: AgentSettings,
+    agent_runtime,
+):
+    if stub_subagents:
+        supervisor_tools.append(_stub_subagent(label, blurb))
+    else:
+        subagent = _create_domain_agent(
+            label,
+            blurb,
+            tools,
+            model=subagent_model,
+            middleware=_agent_middleware(
+                extra,
+                layer=label,
+                settings=settings,
+                agent_runtime=agent_runtime,
+            ),
+            checkpointer=checkpointer,
+            store=store,
+            settings=settings,
+        )
+        supervisor_tools.append(wrap(label, blurb, subagent))
+    domain_lines.append(
+        f"- {subagent_tool_name(label)}: {blurb} Delegate {label} tasks here."
+    )
 
 
 def _endpoints_by_app(endpoints: Sequence) -> dict[str, list]:
@@ -226,6 +315,7 @@ def build_studio_graph(*, model: Optional[str] = None, agent_runtime=None):
         agent_runtime=agent_runtime,
         settings=None if agent_runtime is None else agent_runtime.settings,
         endpoints=None if agent_runtime is None else agent_runtime.endpoints,
+        extra_agents=None if agent_runtime is None else agent_runtime.extra_agents,
     )
 
 
@@ -495,9 +585,14 @@ def _subagent_prompt(
     agent_settings = agent_settings or get_agent_settings()
     names = ", ".join(tool.name for tool in tools)
     entity_terms = agent_settings.platform.entity_terms
+    tool_clause = (
+        f"Use these tools to fulfill the request: {names}. "
+        if names
+        else "You have no tools; answer from this domain's instructions. "
+    )
     prompt = (
         f"You are the {app_label} specialist for an authenticated customer. {blurb} "
-        f"Use these tools to fulfill the request: {names}. "
+        f"{tool_clause}"
         f"Call tools instead of guessing {entity_terms}. "
         "Return a concise result the supervisor can relay to the user. "
         "Do not mention internal HTTP status codes unless the action failed. "
@@ -549,7 +644,7 @@ def _wrap_subagent(app_label: str, blurb: str, subagent) -> StructuredTool:
     tool_name = subagent_tool_name(app_label)
     description = (
         f"{blurb} Pass a natural-language instruction for this domain. "
-        "Use this instead of calling the domain APIs yourself."
+        "Use this instead of handling this domain yourself."
     )
 
     def _call(query: str) -> str:
@@ -599,7 +694,7 @@ def _stub_subagent(app_label: str, blurb: str) -> StructuredTool:
     tool_name = subagent_tool_name(app_label)
     description = (
         f"{blurb} Pass a natural-language instruction for this domain. "
-        "Use this instead of calling the domain APIs yourself."
+        "Use this instead of handling this domain yourself."
     )
 
     def _call(query: str) -> str:

@@ -1,6 +1,6 @@
 # django-auto-agent
 
-Reusable Django app that turns opted-in Django REST Framework endpoints into a LangGraph assistant: a supervisor routes each logged-in user to per-app domain specialists, and those specialists call the host's own APIs in-process.
+Reusable Django app that turns opted-in Django REST Framework endpoints (and optional host `ModelAgent` classes) into a LangGraph assistant: a supervisor routes each logged-in user to per-app domain specialists, and those specialists call the host's own APIs or Python tools in-process.
 
 Import name: `ai_agent`.
 
@@ -131,11 +131,11 @@ The optimizer is on by default when memory is on, except under Django `TESTING`.
 
 **Automatic API tools.** Opt an entire Django app in with `AppConfig.agent_expose = True`, or mark a single view with `@agent_expose` even when the app is off. Exclude url names via `agent_exclude` or `@agent_exclude`. Paths under `/internal/`, `/webhooks/`, and `/callback/`, and views that accept only multipart uploads, are skipped unless the view is explicitly exposed.
 
-**Supervisor and specialists.** Each exposed app becomes one compiled LangGraph subagent whose tools are that app's endpoints. The supervisor does not call those APIs itself; it delegates with `call_<app>_agent` and a natural-language instruction. `AppConfig.agent_description` is the blurb the router sees.
+**Supervisor and specialists.** Each exposed app becomes one compiled LangGraph subagent whose tools are that app's endpoints. Hosts can also register **ModelAgent** subclasses (Python tools, including Django ORM, no DRF views) via `AI_AGENT.EXTRA_AGENTS`. The supervisor does not call those APIs or tools itself; it delegates with `call_<name>_agent` and a natural-language instruction. `AppConfig.agent_description` or `ModelAgent.description` is the blurb the router sees.
 
 **Safety.** User text is wrapped in `<user_message>` tags on the model call only (transcripts and memory keep the original). Supervisor and domain prompts treat that text as untrusted data, refuse jailbreaks and off-topic chat, and inject host vocabulary from `PLATFORM_*` settings. Built-in eval cases cover greetings, jailbreaks, and prompt-leak attempts.
 
-**Mutation confirmation (HITL).** POST, PUT, PATCH, and DELETE interrupt by default so the UI can confirm. AG-UI resumes with `{approved: bool}`; unknown payloads fail closed. `CONFIRM_MUTATIONS = False` turns this off globally; `@agent_expose(confirm=...)` overrides one view.
+**Mutation confirmation (HITL).** POST, PUT, PATCH, and DELETE interrupt by default so the UI can confirm. AG-UI resumes with `{approved: bool}`; unknown payloads fail closed. `CONFIRM_MUTATIONS = False` turns this off globally; `@agent_expose(confirm=...)` overrides one view. `@agent_tool(confirm=True)` opts a ModelAgent method into the same HITL flow (`CONFIRM_MUTATIONS` does not apply to those tools).
 
 **Identity.** `AUTHENTICATE_TOKEN` is required: a callable (or dotted path) that accepts a bearer token and returns a user with `.pk`. LangGraph auth stamps `metadata.owner` so conversations stay private. Client-supplied `configurable.user_id` is ignored outside Django `TESTING`.
 
@@ -243,6 +243,7 @@ Injected into supervisor/domain prompts and overlay guardrails so refusals and "
 | `MAX_TOOL_RESPONSE_CHARS` | `8000` | Truncate in-process tool results and tell the model not to invent omitted fields. |
 | `STUDIO_USER_PHONE` | `""` | Studio/test impersonation login. **Refused when Django `DEBUG` is false.** |
 | `MIDDLEWARE` | `()` | Extra LangChain agent middleware appended after the library stack (dotted paths, classes, instances, or zero-arg factories). |
+| `EXTRA_AGENTS` | `()` | `ModelAgent` subclasses (dotted paths or classes). Each becomes a supervisor specialist (`call_<name>_agent`) without DRF views. |
 
 ### Memory
 
@@ -335,6 +336,46 @@ The `ai_agent` app itself is not exposed as a domain. Its default memory schemas
 
 If an app is not opted in (`agent_expose = False`) but you still set a memory profile, that label is included in memory layers for curator/optimizer runs.
 
+### ModelAgent classes
+
+Register specialists that call Python functions (including the Django ORM) instead of HTTP endpoints. No extra Django app is required.
+
+```python
+from ai_agent.agents import ModelAgent, agent_tool
+from ai_agent.context import get_current_user
+from dummy.models import Item
+
+class CatalogSearchAgent(ModelAgent):
+    name = "catalog_search"
+    description = "Search the authenticated user's catalog items by name."
+
+    @agent_tool
+    def find_items(self, query: str) -> str:
+        """Find catalog items owned by the current user whose name contains query."""
+        user = get_current_user()
+        names = list(
+            Item.objects.filter(owner=user, name__icontains=query).values_list(
+                "name", flat=True
+            )
+        )
+        return ", ".join(names) if names else "No matching items."
+```
+
+```python
+AI_AGENT = {
+    "EXTRA_AGENTS": ["dummy.agents.CatalogSearchAgent"],
+}
+```
+
+| Piece | Effect |
+| --- | --- |
+| `name` | Specialist label: `call_<name>_agent`, child thread id, and memory layer. `[a-zA-Z0-9_-]+`. Reserved: `supervisor`. Must not match an exposed Django app label. |
+| `description` | Router blurb for `call_<name>_agent`. |
+| `@agent_tool` | Expose an instance method as a tool. Optional `name=`, `description=` (docstring otherwise), `confirm=` (HITL, default `False`). |
+| `memory_profile` / `memory_collections` / `memory_episode` | Optional memory schemas for this layer, same meaning as the AppConfig flags. |
+
+Instances are created once per process at graph build. Do not store per-request state on `self`; use `get_current_user()`. A host can register **only** ModelAgent specialists (no exposed APIs). Duplicate `name`s or tool names that collide with an OpenAPI `operationId` raise at graph build.
+
 ### View decorators
 
 ```python
@@ -401,13 +442,13 @@ Discovery is cached for the process. Tests that change URLconf or expose flags s
 
 ### Supervisor graph
 
-`build_supervisor()` groups endpoints by app, compiles one specialist per app, and wraps each as `call_<app>_agent`. The supervisor prompt lists those capabilities, states that it operates only as the logged-in customer, and includes the platform safety policy.
+`build_supervisor()` groups endpoints by app, compiles one specialist per app, wraps each `ModelAgent` the same way, and exposes them as `call_<app>_agent` / `call_<name>_agent`. The supervisor prompt lists those capabilities, states that it operates only as the logged-in customer, and includes the platform safety policy.
 
 A specialist prompt names its tools, tells the model to call them instead of guessing `PLATFORM_ENTITY_TERMS`, and asks for a concise result the supervisor can relay. Nested LangGraph interrupts (mutation HITL inside a subagent) bubble up to the parent so AG-UI clients can resume them.
 
 Shared middleware on both supervisor and specialists: tool-error sanitization, user binding, safety wrap, run limits, optional compaction, optional memory recall/write, then host `MIDDLEWARE`. The supervisor also persists `AgentMessage` rows.
 
-If no endpoints are exposed, graph build raises `RuntimeError`.
+If no specialists are registered (no exposed endpoints and no `EXTRA_AGENTS`), graph build raises `RuntimeError`.
 
 ### Safety
 
@@ -465,7 +506,7 @@ All require Django `IsAuthenticated`. Episodes, playbooks, and prompt overlays a
 
 Architecture, document types, curator pipeline, and overlay recall are described in [Memory](#memory). This section is the operational wiring.
 
-Enable with `MEMORY_ENABLED`. Each layer is either `supervisor` or a Django app label (`AppConfig.agent_memory_profile` / `agent_memory_collections` / `agent_memory_episode`).
+Enable with `MEMORY_ENABLED`. Each layer is either `supervisor`, a Django app label (`AppConfig.agent_memory_profile` / `agent_memory_collections` / `agent_memory_episode`), or a `ModelAgent.name`.
 
 **Background mode** submits the transcript to the memory graph after the turn (`MEMORY_DEBOUNCE_SECONDS`). **Hot mode** also attaches LangMem tools on the conversation agents. Same-turn delete of a fact created in that turn is refused.
 
@@ -543,12 +584,13 @@ AI_AGENT = {
     "PLATFORM_NAME": "Acme",
     "PLATFORM_DOMAINS": ("catalog", "billing"),
     "EVAL_MODULE": "catalog.evals",
+    "EXTRA_AGENTS": ["myproject.agents.ResearchAgent"],
 }
 ```
 
 `AUTHENTICATE_TOKEN` must be a callable (or dotted path to one) that accepts a bearer token and returns a user object with `.pk`.
 
-Include the chat/memory HTTP API and opt host apps in as shown under [Configuration](#configuration) (`AppConfig` flags and `@agent_expose` / `@agent_exclude`).
+Include the chat/memory HTTP API and opt host apps in as shown under [Configuration](#configuration) (`AppConfig` flags, `@agent_expose` / `@agent_exclude`, and optional `ModelAgent` classes in `EXTRA_AGENTS`).
 
 ## LangGraph Agent Server
 

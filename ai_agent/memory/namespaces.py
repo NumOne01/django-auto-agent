@@ -35,8 +35,13 @@ def global_prompt_namespace(layer: str) -> tuple[str, ...]:
 
 
 def agent_memory_layers() -> list[str]:
-    """Supervisor plus every app that exposes agent APIs or a memory profile."""
+    """Supervisor plus every app that exposes agent APIs or a memory profile.
+
+    ``ModelAgent`` names from ``AI_AGENT.EXTRA_AGENTS`` are included as well.
+    """
     from django.apps import apps
+
+    from ai_agent.agents import model_agent_names
 
     labels = [SUPERVISOR_LAYER]
     for config in apps.get_app_configs():
@@ -46,6 +51,9 @@ def agent_memory_layers() -> list[str]:
             config, "agent_memory_profile", None
         ):
             labels.append(config.label)
+    for name in model_agent_names():
+        if name not in labels:
+            labels.append(name)
     return labels
 
 

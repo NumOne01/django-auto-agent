@@ -33,6 +33,7 @@ class AgentRuntime:
     checkpointer: object | None
     store: object | None
     extra_middleware: tuple = ()
+    extra_agents: tuple = ()
 
     _lock: Lock = field(default_factory=Lock, repr=False, compare=False)
     _supervisor: object | None = field(default=None, repr=False, compare=False)
@@ -64,7 +65,9 @@ class AgentRuntime:
         checkpointer: Any = _MISSING,
         store: Any = _MISSING,
         extra_middleware: Sequence | None = None,
+        extra_agents: Sequence | None = None,
     ) -> AgentRuntime:
+        from ai_agent.agents import resolve_model_agents
         from ai_agent.graph import build_checkpointer
         from ai_agent.memory.store import build_memory_store
 
@@ -78,12 +81,20 @@ class AgentRuntime:
         resolved_store = (
             build_memory_store(agent_settings) if store is _MISSING else store
         )
+        resolved_extra_agents = tuple(
+            resolve_model_agents(
+                settings=agent_settings,
+                extra_agents=extra_agents,
+                endpoints=resolved_endpoints,
+            )
+        )
         return cls(
             settings=agent_settings,
             endpoints=resolved_endpoints,
             checkpointer=resolved_checkpointer,
             store=resolved_store,
             extra_middleware=tuple(extra_middleware or ()),
+            extra_agents=resolved_extra_agents,
         )
 
     def supervisor(self, **kwargs):
@@ -104,6 +115,7 @@ class AgentRuntime:
         kwargs.setdefault("checkpointer", self.checkpointer)
         kwargs.setdefault("store", self.store)
         kwargs.setdefault("extra_middleware", self.extra_middleware)
+        kwargs.setdefault("extra_agents", self.extra_agents)
         kwargs.setdefault("agent_runtime", self)
         return build_supervisor(**kwargs)
 
@@ -115,6 +127,7 @@ class AgentRuntime:
         kwargs.setdefault("checkpointer", self.checkpointer)
         kwargs.setdefault("store", self.store)
         kwargs.setdefault("extra_middleware", self.extra_middleware)
+        kwargs.setdefault("extra_agents", self.extra_agents)
         kwargs.setdefault("agent_runtime", self)
         return build_domain_agent(app_label, **kwargs)
 
