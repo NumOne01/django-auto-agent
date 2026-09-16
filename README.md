@@ -4,16 +4,18 @@ Reusable Django app that turns opted-in Django REST Framework endpoints into a L
 
 Import name: `ai_agent`.
 
+The usual alternative is a second chatbot codebase that reimplements what the product APIs already do, plus a pile of hand-tuned prompts that look great on a development dataset and then fail in production. This package is built for the opposite: reuse the Django app you already have, and let the agent **improve from real user interactions** (memory + prompt overlays) instead of overfitting those prompts offline.
+
 The package walks the host URLconf, finds DRF views the host has opted in, and builds a LangChain tool for each HTTP method from the `drf-spectacular` OpenAPI schema (path, query, and body arguments). Tools are grouped by Django app into **domain subagents**. A **supervisor** agent routes the request to the matching specialist (or several, when the user asks about more than one domain).
 
 Tool execution does not go over the network. The library builds a DRF request, `force_authenticate`s it as the JWT user, and invokes the view. The model never receives a user id; tools always run as that authenticated user.
 
 Optional pieces, all off or conservative by default:
 
-- Long-term memory (LangMem + a LangGraph store), with a curator, caps, and prompt overlays
+- Long-term memory (LangMem + a LangGraph store), with a curator, caps, and prompt overlays that evolve from live traffic
 - Conversation compaction that does not stream into AG-UI chat
 - Django admin for threads, memories, prompt overlays, and user-visible messages
-- AG-UI HTTP (`/agui`) on the LangGraph Agent Server
+- Native AG-UI HTTP (`/agui`) on the LangGraph Agent Server — any AG-UI client, not a lock-in to one chat SDK
 - Live-model evals against a host-supplied fixture world
 
 This repository's `dummy` and `notes` apps plus `tests/settings.py` are a sample host. They are not installed with the wheel.
@@ -106,16 +108,16 @@ The memory agent is instructed to skip greetings, one-off requests, raw tool dum
 
 ### Prompt optimization
 
-Overlays are **learned standing instructions**, not recalled chat. The optimizer maps stored **episodes** to short trajectories (observation → thoughts/action → result), never the raw transcript. It then proposes extra prompt text that is stored and, on later turns, injected above the long-term memory block.
+Overlays are how the agent **auto-evolves**. The point is not to freeze a prompt that passed a development eval set, then discover it fails on real traffic. After each session, durable episodes (what the user needed, what the agent did, what worked or failed) become short trajectories. The optimizer turns those trajectories into extra standing instructions. The next turn loads them. The more people use the agent, the better the overlays get — without you hand-editing the system prompt for every new failure mode.
 
-Two scopes:
+Two scopes so a personal lesson does not become everyone else's context:
 
 | Scope | Namespace | When it runs | Guardrails |
 | --- | --- | --- | --- |
 | Local | `memories / {user_id} / {layer} / prompt` | After the curator, if there are at least `MEMORY_PROMPT_OPTIMIZER_MIN_NEW_EPISODES` new episodes (or a new failure). Also `manage.py optimize_agent_prompts --scope local`. | Max `MEMORY_PROMPT_OPTIMIZER_LOCAL_MAX_CHARS`. Frozen safety clauses must still be present when the overlay is concatenated with the base policy. |
 | Global | `prompts / global / {layer}` | Cron / `manage.py optimize_agent_prompts --scope global`. Needs `MEMORY_PROMPT_OPTIMIZER_MIN_GLOBAL_USERS` distinct users with recent episodes. | Max `MEMORY_PROMPT_OPTIMIZER_GLOBAL_MAX_CHARS`. PII regexes (email, phone, PAN, IBAN, amounts, plus `PLATFORM_*` patterns) must not match; a leak rejects the publish. |
 
-Invalid overlays are skipped at recall, so a bad store document does not change behavior.
+Local overlays adapt the agent to **that** customer. Global overlays share lessons that showed up across users, with PII scrubbed so personal data does not leak into the shared prompt. Invalid overlays are skipped at recall, so a bad store document does not change behavior.
 
 ```mermaid
 flowchart LR
@@ -142,6 +144,10 @@ The optimizer is on by default when memory is on, except under Django `TESTING`.
 **Transcripts.** User-visible supervisor turns are stored in `AgentMessage`, independent of compacted LangGraph checkpoints. The product chat history API reads that table, not the checkpointer.
 
 **Long-term memory.** Off until `MEMORY_ENABLED`. Background mode writes after the turn; hot mode also exposes manage/search tools on the conversation agents. Each layer (supervisor plus each opted-in app) has a profile, semantic facts, episodes, a local playbook, and prompt overlays. A curator reconciles duplicates and caps; a prompt optimizer can write local and global overlays from episodes.
+
+**Auto-evolving prompts.** Episodes from live use become prompt overlays (per user and, with PII stripped, globally). The agent is meant to get better in production instead of overfitting a development prompt.
+
+**AG-UI.** The Agent Server mounts `/agui`. Any AG-UI client can stream chat, tool calls, and mutation confirmations with the product Bearer token. CopilotKit (or another frontend) is a host extra, not a requirement.
 
 **Compaction.** Optional summarization middleware. Summarizer tokens are suppressed so they do not appear in AG-UI chat.
 
@@ -413,9 +419,15 @@ Prompt overlays generated by the optimizer are checked against frozen safety cla
 
 ### Auth and AG-UI
 
-LangGraph Platform auth (`ai_agent.auth:auth`) validates `Authorization: Bearer <token>` with `AUTHENTICATE_TOKEN`, except `GET /ok` (health). Threads and runs are stamped and filtered by `metadata.owner` (the user's pk). Assistants are readable by any authenticated user so Studio, the LangGraph SDK, and AG-UI clients can search the built-in graph; create/update/delete on assistants is forbidden.
+The Agent Server mounts a native **AG-UI** HTTP app at `/agui` (`ai_agent.studio:app`). Point any AG-UI client at that URL with `Authorization: Bearer <access_token>`:
 
-`ai_agent.studio:app` mounts AG-UI at `/agui`. Every request except CORS `OPTIONS` requires the same bearer token and is subject to `HTTP_THROTTLE`. Clients that speak AG-UI should use that path, not the raw LangGraph runs API.
+- Streaming assistant tokens and tool calls
+- Mutation HITL (resume with `{approved: bool}`; cancel / unknown payloads fail closed)
+- The same JWT as the rest of the product — CORS `OPTIONS` is the only unauthenticated method; everything else is throttled (`HTTP_THROTTLE`)
+
+Use `/agui` for chat UIs, not the raw LangGraph runs API. Compaction summaries are marked so they do not stream into the AG-UI transcript.
+
+LangGraph Platform auth (`ai_agent.auth:auth`) validates that bearer token with `AUTHENTICATE_TOKEN`, except `GET /ok` (health). Threads and runs are stamped and filtered by `metadata.owner` (the user's pk). Assistants are readable by any authenticated user so Studio, the LangGraph SDK, and AG-UI clients can search the built-in graph; create/update/delete on assistants is forbidden.
 
 Do not pass `configurable.user_id` from the browser. Tools run as the JWT user. List and resume conversations with `@langchain/langgraph-sdk` against the same host (`threads.search`, `threads.getHistory`) using the same bearer token.
 
