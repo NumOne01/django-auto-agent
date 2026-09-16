@@ -20,9 +20,10 @@ This repository's `dummy` and `notes` apps plus `tests/settings.py` are a sample
 
 ```mermaid
 flowchart LR
-  User --> Agent
-  Agent --> APIs
-  Agent --> Memory
+  User --> Supervisor
+  Supervisor --> Subagent
+  Subagent --> APIs
+  Supervisor --> Memory
 ```
 
 ## Memory
