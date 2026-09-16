@@ -1,0 +1,108 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.agent-banner { margin: 10px 0; padding: 10px 12px; border: 1px solid #ba2121; background: #fff8f8; }
+.agent-meta { margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--border-color, #ddd); border-radius: 4px; }
+.agent-transcript { display: flex; flex-direction: column; gap: 10px; max-width: 860px; }
+.agent-msg { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-color, #ddd); }
+.agent-msg.human { background: #f4f8ff; }
+.agent-msg.ai { background: #f7f7f7; }
+.agent-msg.tool { background: #fffaf0; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+.agent-msg.system { color: #666; }
+.agent-msg-meta { font-size: 12px; color: #666; margin-bottom: 6px; }
+.agent-related { margin-top: 24px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    <a href="{% url 'admin:ai_agent_agentthread_changelist' %}">&larr; All threads</a>
+    {% if thread %}
+      · <a href="{% url 'admin:ai_agent_agentmessage_changelist' %}?q={{ thread.thread_id }}">Product transcript</a>
+    {% endif %}
+    {% if thread and thread.user %}
+      · <a href="{% url 'admin:ai_agent_agentthread_changelist' %}?user={{ thread.owner_id }}">User threads</a>
+      · <a href="{% url 'admin:ai_agent_agentmemory_user' thread.user.pk %}">User memories</a>
+    {% endif %}
+  </p>
+
+  {% if error %}
+  <p class="agent-banner">{{ error }}</p>
+  {% endif %}
+
+  {% if thread %}
+  <div class="agent-meta">
+    <p><strong>Thread:</strong> {{ thread.thread_id }}</p>
+    <p>
+      <strong>User:</strong>
+      {% if thread.user %}
+        {{ thread.user.get_username }}
+        {% if thread.user.get_full_name %}
+          ({{ thread.user.get_full_name }})
+        {% endif %}
+      {% elif thread.owner_id %}
+        {{ thread.owner_id }}
+      {% else %}
+        —
+      {% endif %}
+    </p>
+    <p><strong>Status:</strong> {{ thread.status|default:"—" }}</p>
+    <p><strong>Created:</strong> {{ thread.created_at|default:"—" }}</p>
+    <p><strong>Updated:</strong> {{ thread.updated_at|default:"—" }}</p>
+    {% if thread.is_child %}
+    <p><strong>Subagent:</strong> {{ thread.child_label|default:"yes" }}
+      {% if thread.parent_thread_id %}
+      · <a href="{% url 'admin:ai_agent_agentthread_change' thread.parent_thread_id %}">Parent thread</a>
+      {% endif %}
+    </p>
+    {% endif %}
+  </div>
+
+  <h2>Transcript</h2>
+  <div class="agent-transcript">
+    {% for msg in thread.messages %}
+    <div class="agent-msg {{ msg.role }}">
+      <div class="agent-msg-meta">
+        <strong>{{ msg.role }}</strong>
+        {% if msg.name %} · {{ msg.name }}{% endif %}
+        {% if msg.truncated %} · truncated{% endif %}
+      </div>
+      <div>{{ msg.content|linebreaksbr }}</div>
+    </div>
+    {% empty %}
+    <p>No messages in this thread.</p>
+    {% endfor %}
+  </div>
+
+  {% if thread.related %}
+  <div class="agent-related module">
+    <h2>Related subagent threads</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Thread</th>
+          <th>Domain</th>
+          <th>Messages</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for related in thread.related %}
+        <tr>
+          <td><a href="{% url 'admin:ai_agent_agentthread_change' related.thread_id %}">{{ related.thread_id }}</a></td>
+          <td>{{ related.child_label|default:"—" }}</td>
+          <td>{{ related.message_count }}</td>
+          <td>{{ related.updated_at|default:"—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

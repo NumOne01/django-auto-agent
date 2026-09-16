@@ -1,0 +1,188 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.agent-banner { margin: 10px 0; padding: 10px 12px; border: 1px solid #ba2121; background: #fff8f8; }
+.agent-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0 16px; }
+.agent-filters label { display: block; font-weight: 600; margin-bottom: 4px; }
+.agent-preview { max-width: 520px; color: #555; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+.agent-overall { font-weight: 600; }
+.agent-section { margin: 22px 0 28px; }
+.agent-muted { color: #666; }
+.agent-actions { margin: 0 0 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% if error %}
+  <p class="agent-banner">{{ error }}</p>
+  {% endif %}
+
+  <p class="agent-muted">
+    Code system prompts stay in source. These overlays are learned from stored episodes.
+    Global overlays apply to every customer; user addenda apply to one person.
+  </p>
+
+  <form method="get" class="agent-filters">
+    <div>
+      <label for="id_q">Search</label>
+      <input id="id_q" type="text" name="q" value="{{ q }}" placeholder="Text, key, phone">
+    </div>
+    <div>
+      <label for="id_user">User (addenda)</label>
+      <input id="id_user" type="text" name="user" value="{{ user_filter }}" placeholder="User id or phone">
+    </div>
+    <div>
+      <label for="id_layer">Layer</label>
+      <input id="id_layer" type="text" name="layer" value="{{ layer_filter }}" placeholder="supervisor, wallet, …">
+    </div>
+    <div>
+      <input type="submit" value="Filter" class="default">
+      <a href="{% url 'admin:ai_agent_agentprompt_changelist' %}" class="button">Clear</a>
+    </div>
+  </form>
+
+  <form method="post" id="prompt-changelist-form">
+    {% csrf_token %}
+    {% if query_string %}<input type="hidden" name="next" value="?{{ query_string }}">{% endif %}
+    {% if can_delete and has_overlays %}
+    <div class="actions agent-actions">
+      <label>
+        Action:
+        <select name="action">
+          <option value="">---------</option>
+          <option value="delete">Delete selected overlays</option>
+        </select>
+      </label>
+      <button type="submit" class="button">Go</button>
+    </div>
+    {% endif %}
+
+  <div class="agent-section module">
+    <h2>Global overlays</h2>
+    <table>
+      <thead>
+        <tr>
+          {% if can_delete and has_overlays %}
+          <th class="action-checkbox-column">
+            <input type="checkbox" id="action-toggle" title="Select all">
+          </th>
+          {% endif %}
+          <th>Layer</th>
+          <th>Updated</th>
+          <th>Versions</th>
+          <th>Current prompt</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in global_overlays %}
+        <tr>
+          {% if can_delete %}
+          <td class="action-checkbox">
+            <input type="checkbox" name="selected" value="{{ item.item_id }}" class="action-select">
+          </td>
+          {% endif %}
+          <td>
+            <a href="{% url 'admin:ai_agent_agentprompt_change' item.item_id %}">
+              {% if item.layer == supervisor_layer %}
+                <span class="agent-overall">{{ item.layer_display }}</span>
+              {% else %}
+                {{ item.layer_display }}
+              {% endif %}
+            </a>
+          </td>
+          <td>{{ item.updated_at|default:item.memory.updated_at|default:"—" }}</td>
+          <td>{{ item.version_count }}</td>
+          <td class="agent-preview">{{ item.current|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="{% if can_delete and has_overlays %}5{% else %}4{% endif %}">{% if error %}No overlays loaded.{% else %}No global overlays stored.{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="agent-section module">
+    <h2>Per-user addenda</h2>
+    <table>
+      <thead>
+        <tr>
+          {% if can_delete and has_overlays %}
+          <th class="action-checkbox-column"></th>
+          {% endif %}
+          <th>User</th>
+          <th>Layer</th>
+          <th>Updated</th>
+          <th>Versions</th>
+          <th>Current prompt</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in local_overlays %}
+        <tr>
+          {% if can_delete %}
+          <td class="action-checkbox">
+            <input type="checkbox" name="selected" value="{{ item.item_id }}" class="action-select">
+          </td>
+          {% endif %}
+          <td>
+            {% if item.user %}
+              <a href="{% url 'admin:ai_agent_agentmemory_user' item.user.pk %}">{{ item.user.get_username }}</a>
+            {% elif item.user_id %}
+              {{ item.user_id }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            <a href="{% url 'admin:ai_agent_agentprompt_change' item.item_id %}">
+              {% if item.layer == supervisor_layer %}
+                <span class="agent-overall">{{ item.layer_display }}</span>
+              {% else %}
+                {{ item.layer_display }}
+              {% endif %}
+            </a>
+          </td>
+          <td>{{ item.updated_at|default:item.memory.updated_at|default:"—" }}</td>
+          <td>{{ item.version_count }}</td>
+          <td class="agent-preview">{{ item.current|default:"—" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="{% if can_delete and has_overlays %}6{% else %}5{% endif %}">{% if error %}No overlays loaded.{% else %}No user addenda found.{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  </form>
+
+  {% if paginator.num_pages > 1 %}
+  <p class="paginator">
+    {% if page_obj.has_previous %}
+      <a href="?{% if query_string %}{{ query_string }}&amp;{% endif %}p={{ page_obj.previous_page_number }}">Previous</a>
+    {% endif %}
+    Page {{ page_obj.number }} of {{ paginator.num_pages }} ({{ paginator.count }} user addenda)
+    {% if page_obj.has_next %}
+      <a href="?{% if query_string %}{{ query_string }}&amp;{% endif %}p={{ page_obj.next_page_number }}">Next</a>
+    {% endif %}
+  </p>
+  {% endif %}
+</div>
+<script>
+(function () {
+  var toggle = document.getElementById("action-toggle");
+  if (!toggle) return;
+  toggle.addEventListener("change", function () {
+    document.querySelectorAll(".action-select").forEach(function (box) {
+      box.checked = toggle.checked;
+    });
+  });
+})();
+</script>
+{% endblock %}

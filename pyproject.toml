@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "django-auto-agent"
+version = "0.1.0"
+description = "Django reusable app: DRF-to-LangGraph agent bridge with long-term memory."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "Django>=4.2",
+    "djangorestframework",
+    "drf-spectacular",
+    "fastapi",
+    "langchain>=1.0.0",
+    "langchain-openai>=1.0.0",
+    "langgraph>=1.0.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+    "langgraph-sdk>=0.1.61",
+    "langmem>=0.0.29",
+    "psycopg[binary]>=3.1.0",
+    "psycopg-pool>=3.2.0",
+    "copilotkit>=0.1.96",
+]
+
+[project.optional-dependencies]
+redis = [
+    "redis>=5.0.0",
+    "langgraph-checkpoint-redis",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["ai_agent*"]
+exclude = ["ai_agent.tests*", "tests*", "dummy*", "notes*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["*/__pycache__/*", "*.pyc"]
+ai_agent = ["tests/*"]

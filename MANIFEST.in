@@ -1,0 +1,6 @@
+recursive-include ai_agent/templates *
+recursive-include ai_agent/migrations *
+include ai_agent/Dockerfile
+prune ai_agent/tests
+global-exclude *.pyc
+recursive-exclude * __pycache__

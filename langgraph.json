@@ -1,0 +1,24 @@
+{
+  "//cors": "Example only. Bearer-token auth (not cookies) limits CSRF risk; restrict allow_origins in production.",
+  "dependencies": ["."],
+  "graphs": {
+    "assistant": "./ai_agent/studio.py:graph",
+    "memory": "./ai_agent/studio.py:memory",
+    "memory_curator": "./ai_agent/studio.py:memory_curator"
+  },
+  "auth": {
+    "path": "./ai_agent/auth.py:auth",
+    "disable_studio_auth": true
+  },
+  "http": {
+    "app": "./ai_agent/studio.py:app",
+    "enable_custom_route_auth": true,
+    "cors": {
+      "allow_origins": ["*"],
+      "allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      "allow_headers": ["Authorization", "Content-Type", "x-api-key"]
+    }
+  },
+  "env": ".env",
+  "keep_pkg_tools": ["setuptools"]
+}

@@ -1,0 +1,89 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.agent-banner { margin: 10px 0; padding: 10px 12px; border: 1px solid #ba2121; background: #fff8f8; }
+.agent-json { white-space: pre-wrap; font-family: monospace; font-size: 12px; max-width: 860px; }
+.agent-overall { font-weight: 600; }
+.agent-meta { margin: 0 0 16px; }
+.agent-section { margin: 18px 0 24px; }
+.agent-muted { color: #666; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    <a href="{% url 'admin:ai_agent_agentprompt_changelist' %}">&larr; All prompt overlays</a>
+    {% if overlay.user %}
+      · <a href="{% url 'admin:ai_agent_agentmemory_user' overlay.user.pk %}">User memories</a>
+      {% if user_change_url %}
+      · <a href="{{ user_change_url }}">User</a>
+      {% endif %}
+    {% endif %}
+  </p>
+
+  {% if error %}
+  <p class="agent-banner">{{ error }}</p>
+  {% endif %}
+
+  {% if overlay %}
+  <p class="agent-meta">
+    <strong>
+      {% if overlay.scope == "global" %}Global overlay{% else %}User addendum{% endif %}
+    </strong>
+    ·
+    {% if overlay.layer == supervisor_layer %}
+      <span class="agent-overall">{{ overlay.layer_display }}</span>
+    {% else %}
+      {{ overlay.layer_display }}
+    {% endif %}
+    {% if overlay.user %}
+      · {{ overlay.user.get_username }}
+    {% elif overlay.user_id %}
+      · user {{ overlay.user_id }}
+    {% endif %}
+    · updated {{ overlay.updated_at|default:overlay.memory.updated_at|default:"—" }}
+    · {{ overlay.version_count }} version{{ overlay.version_count|pluralize }}
+  </p>
+
+  <div class="agent-section module">
+    <h2>Current</h2>
+    {% if overlay.current %}
+    <pre class="agent-json">{{ overlay.current }}</pre>
+    {% else %}
+    <p class="agent-muted">Empty overlay.</p>
+    {% endif %}
+  </div>
+
+  <div class="agent-section module">
+    <h2>History</h2>
+    <p class="agent-muted">Newest previous version first. The live overlay is above.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Episode watermark</th>
+          <th>Prompt text</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for version in overlay.history %}
+        <tr>
+          <td>{{ version.updated_at|default:"—" }}</td>
+          <td>{{ version.item_count|default:"—" }}</td>
+          <td><pre class="agent-json">{{ version.text }}</pre></td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="3">No previous versions stored.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
