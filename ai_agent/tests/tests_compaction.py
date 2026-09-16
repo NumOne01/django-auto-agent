@@ -79,7 +79,7 @@ class CompactionEnabledTests(TestCase):
             build_domain_agent("dummy")
         self.assertIn(fake, mock_create.call_args.kwargs["middleware"])
 
-    def test_compaction_runs_after_copilotkit_and_before_memory(self):
+    def test_compaction_runs_after_limits_and_before_memory(self):
         fake = object()
         agent_settings = _compaction_settings(
             MEMORY_ENABLED=True,
@@ -95,13 +95,12 @@ class CompactionEnabledTests(TestCase):
             items = _agent_middleware(layer="supervisor")
         kinds = [type(item).__name__ for item in items]
         self.assertEqual(kinds[2], "SafetyMiddleware")
-        self.assertEqual(kinds[3], "CopilotKitMiddleware")
-        self.assertEqual(kinds[4], "TranscriptMiddleware")
-        self.assertEqual(kinds[5], "ModelCallLimitMiddleware")
-        self.assertEqual(kinds[6], "RunTimeoutMiddleware")
-        self.assertIs(items[7], fake)
-        self.assertEqual(kinds[8], "MemoryRecallMiddleware")
-        self.assertEqual(kinds[9], "MemoryWriteMiddleware")
+        self.assertEqual(kinds[3], "TranscriptMiddleware")
+        self.assertEqual(kinds[4], "ModelCallLimitMiddleware")
+        self.assertEqual(kinds[5], "RunTimeoutMiddleware")
+        self.assertIs(items[6], fake)
+        self.assertEqual(kinds[7], "MemoryRecallMiddleware")
+        self.assertEqual(kinds[8], "MemoryWriteMiddleware")
 
 
 class CompactionConfigTests(TestCase):
@@ -195,26 +194,25 @@ class CompactionConfigTests(TestCase):
 
 
 class CompactionStreamSilenceTests(TestCase):
-    def test_quiet_config_sets_copilotkit_and_agui_flags(self):
+    def test_quiet_config_sets_agui_flags(self):
         config = _quiet_summary_config(
             {"metadata": {"lc_source": "summarization", "keep": "me"}}
         )
         metadata = config["metadata"]
         self.assertEqual(metadata["lc_source"], "summarization")
         self.assertEqual(metadata["keep"], "me")
-        self.assertIs(metadata["copilotkit:emit-messages"], False)
-        self.assertIs(metadata["copilotkit:emit-tool-calls"], False)
         self.assertIs(metadata["emit-messages"], False)
         self.assertIs(metadata["emit-tool-calls"], False)
+        self.assertNotIn("copilotkit:emit-messages", metadata)
+        self.assertNotIn("copilotkit:emit-tool-calls", metadata)
 
     def test_quiet_config_does_not_mutate_parent_metadata(self):
         parent_meta = {"lc_source": "agent"}
         parent = {"metadata": parent_meta, "tags": ["keep"]}
         quiet = _quiet_summary_config(parent)
         self.assertEqual(parent_meta, {"lc_source": "agent"})
-        self.assertNotIn("copilotkit:emit-messages", parent_meta)
         self.assertNotIn("emit-messages", parent_meta)
-        self.assertIs(quiet["metadata"]["copilotkit:emit-messages"], False)
+        self.assertIs(quiet["metadata"]["emit-messages"], False)
         self.assertEqual(parent["tags"], ["keep"])
 
     def test_build_wraps_summary_model_invoke(self):
@@ -229,7 +227,6 @@ class CompactionStreamSilenceTests(TestCase):
         )
         passed = inner.invoke.call_args.kwargs["config"]["metadata"]
         self.assertEqual(passed["lc_source"], "summarization")
-        self.assertIs(passed["copilotkit:emit-messages"], False)
         self.assertIs(passed["emit-messages"], False)
 
     def test_build_wraps_summary_model_ainvoke(self):
@@ -245,7 +242,6 @@ class CompactionStreamSilenceTests(TestCase):
         )
         asyncio.run(middleware._summary_model.ainvoke("prompt"))
         passed = inner.last_config["metadata"]
-        self.assertIs(passed["copilotkit:emit-messages"], False)
         self.assertIs(passed["emit-messages"], False)
 
     def test_warns_when_summary_model_is_missing(self):

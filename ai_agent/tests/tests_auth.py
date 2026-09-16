@@ -1,4 +1,4 @@
-"""LangGraph JWT auth handlers and CopilotKit Bearer gate."""
+"""LangGraph JWT auth handlers and AG-UI Bearer gate."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -18,7 +18,7 @@ from ai_agent.auth import (
     on_assistants,
     on_threads,
 )
-from ai_agent.graph import build_copilotkit_http_app, build_studio_graph
+from ai_agent.graph import build_agui_http_app, build_studio_graph
 from ai_agent.http_auth import _client_ip, _enforce_http_throttle
 from langgraph_sdk import Auth
 
@@ -153,11 +153,11 @@ class LangGraphAssistantAuthTests(TestCase):
         self.assertEqual(caught.exception.status_code, 403)
 
 
-class CopilotKitAuthGateTests(TestCase):
+class AguiAuthGateTests(TestCase):
     def setUp(self):
         cache.clear()
         self.user = User.objects.create_user(
-            username="copilot",
+            username="agui",
             password="pass12345",
         )
 
@@ -172,7 +172,7 @@ class CopilotKitAuthGateTests(TestCase):
         self._agent_override.enable()
         self.addCleanup(self._agent_override.disable)
         graph = build_studio_graph(model=FakeListChatModel(responses=["ok"]))
-        self.app = build_copilotkit_http_app(graph)
+        self.app = build_agui_http_app(graph)
 
     def _client(self):
         from fastapi.testclient import TestClient
@@ -180,12 +180,12 @@ class CopilotKitAuthGateTests(TestCase):
         return TestClient(self.app, raise_server_exceptions=False)
 
     def test_missing_authorization_is_401(self):
-        response = self._client().post("/copilotkit", json={})
+        response = self._client().post("/agui", json={})
         self.assertEqual(response.status_code, 401)
 
     def test_invalid_authorization_is_401(self):
         response = self._client().post(
-            "/copilotkit",
+            "/agui",
             json={},
             headers={"Authorization": "Bearer not-a-jwt"},
         )
@@ -193,14 +193,14 @@ class CopilotKitAuthGateTests(TestCase):
 
     def test_valid_token_passes_the_gate(self):
         response = self._client().post(
-            "/copilotkit",
+            "/agui",
             json={},
             headers={"Authorization": f"Bearer {self.user.username}"},
         )
         self.assertNotEqual(response.status_code, 401)
 
     def test_options_preflight_skips_auth(self):
-        response = self._client().options("/copilotkit")
+        response = self._client().options("/agui")
         self.assertNotEqual(response.status_code, 401)
 
     def test_rate_limit_returns_429(self):
@@ -210,12 +210,12 @@ class CopilotKitAuthGateTests(TestCase):
         ):
             client = self._client()
             first = client.post(
-                "/copilotkit",
+                "/agui",
                 json={},
                 headers={"Authorization": "Bearer not-a-jwt"},
             )
             second = client.post(
-                "/copilotkit",
+                "/agui",
                 json={},
                 headers={"Authorization": "Bearer not-a-jwt"},
             )
@@ -228,9 +228,9 @@ class CopilotKitAuthGateTests(TestCase):
             AI_AGENT=_offline_agent_settings(HTTP_THROTTLE="1/minute")
         ):
             client = self._client()
-            self.assertNotEqual(client.options("/copilotkit").status_code, 401)
+            self.assertNotEqual(client.options("/agui").status_code, 401)
             response = client.post(
-                "/copilotkit",
+                "/agui",
                 json={},
                 headers={"Authorization": "Bearer not-a-jwt"},
             )

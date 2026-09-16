@@ -104,6 +104,39 @@ class GraphHookTests(TestCase):
         kinds = [type(item) for item in _agent_middleware([extra])]
         self.assertIs(kinds[-1], type(extra))
 
+    def test_settings_middleware_is_appended_before_extra(self):
+        extra = MagicMock(name="programmatic")
+        extra.__class__ = type("EvalRecorder", (), {})
+
+        class HostMarkerMiddleware:
+            pass
+
+        agent_settings = {
+            **settings.AI_AGENT,
+            "COMPACTION_ENABLED": False,
+            "MEMORY_ENABLED": False,
+            "MIDDLEWARE": [HostMarkerMiddleware],
+        }
+        with override_settings(AI_AGENT=agent_settings):
+            items = _agent_middleware([extra])
+        kinds = [type(item).__name__ for item in items]
+        self.assertEqual(kinds[-2], "HostMarkerMiddleware")
+        self.assertIs(items[-1], extra)
+        self.assertNotIn("CopilotKitMiddleware", kinds)
+
+    def test_bad_settings_middleware_raises(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        agent_settings = {
+            **settings.AI_AGENT,
+            "COMPACTION_ENABLED": False,
+            "MEMORY_ENABLED": False,
+            "MIDDLEWARE": ["ai_agent.tests.missing.Nope"],
+        }
+        with override_settings(AI_AGENT=agent_settings):
+            with self.assertRaises(ImproperlyConfigured):
+                _agent_middleware()
+
     def test_reraise_nested_interrupt_from_result_dict(self):
         payload = Interrupt(value={"action": "withdraw", "args": {"amount": "1"}})
         with self.assertRaises(GraphInterrupt) as ctx:

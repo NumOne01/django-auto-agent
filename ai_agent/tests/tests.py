@@ -312,18 +312,18 @@ class MutationInterruptTests(TestCase):
         mock_invoke.assert_called_once()
         self.assertEqual(result, "HTTP 201: ok")
 
-    def test_copilotkit_reject_payload_does_not_mutate(self):
+    def test_agui_reject_payload_does_not_mutate(self):
         result, mock_interrupt, mock_invoke = self._run_tool({"approved": False})
         mock_interrupt.assert_called_once()
         mock_invoke.assert_not_called()
         self.assertIn("declined", result.lower())
 
-    def test_copilotkit_approve_payload_mutates(self):
+    def test_agui_approve_payload_mutates(self):
         result, _, mock_invoke = self._run_tool({"approved": True})
         mock_invoke.assert_called_once()
         self.assertEqual(result, "HTTP 201: ok")
 
-    def test_copilotkit_cancel_sentinel_does_not_mutate(self):
+    def test_agui_cancel_sentinel_does_not_mutate(self):
         result, _, mock_invoke = self._run_tool(
             {"__agui_cancelled__": True, "interrupt_id": "abc"}
         )

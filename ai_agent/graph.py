@@ -7,7 +7,6 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import Optional
 
-from copilotkit import CopilotKitMiddleware
 from django.apps import apps
 from django.conf import settings
 from langchain.agents import create_agent
@@ -16,7 +15,7 @@ from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import StructuredTool
 from langgraph.errors import GraphBubbleUp, GraphInterrupt
 
-from ai_agent.conf import AgentSettings, get_agent_settings
+from ai_agent.conf import AgentSettings, get_agent_settings, resolve_agent_middleware
 from ai_agent.messages import message_text
 from ai_agent.safety import (
     DOMAIN_SAFETY_POLICY,
@@ -244,15 +243,13 @@ def build_curator_graph(*, store=None):
     return _build(store=store)
 
 
-def build_copilotkit_http_app(compiled_graph):
+def build_agui_http_app(compiled_graph):
     """AG-UI FastAPI app mounted next to Agent Server via ``langgraph.json`` ``http.app``.
 
-    Studio keeps the default LangGraph routes. CopilotKit clients that speak AG-UI
-    (``LangGraphHttpAgent``) should use ``http://127.0.0.1:2024/copilotkit`` with
-    ``Authorization: Bearer <access_token>``.
+    Studio keeps the default LangGraph routes. AG-UI clients should use
+    ``http://127.0.0.1:2024/agui`` with ``Authorization: Bearer <access_token>``.
     """
-    from ag_ui_langgraph import add_langgraph_fastapi_endpoint
-    from copilotkit import LangGraphAGUIAgent
+    from ag_ui_langgraph import LangGraphAgent, add_langgraph_fastapi_endpoint
     from fastapi import Depends, FastAPI
 
     from ai_agent.http_auth import require_bearer_user
@@ -260,7 +257,7 @@ def build_copilotkit_http_app(compiled_graph):
     app = FastAPI(dependencies=[Depends(require_bearer_user)])
     add_langgraph_fastapi_endpoint(
         app=app,
-        agent=LangGraphAGUIAgent(
+        agent=LangGraphAgent(
             name="assistant",
             description=(
                 f"Assistant for {get_agent_settings().platform.platform_name}. "
@@ -268,7 +265,7 @@ def build_copilotkit_http_app(compiled_graph):
             ),
             graph=compiled_graph,
         ),
-        path="/copilotkit",
+        path="/agui",
     )
     return app
 
@@ -285,7 +282,6 @@ def _agent_middleware(
         ToolErrorMiddleware(on_error=_on_tool_error),
         AgentUserMiddleware(),
         SafetyMiddleware(),
-        CopilotKitMiddleware(),
     ]
     if layer == SUPERVISOR_LAYER:
         from ai_agent.transcript import TranscriptMiddleware
@@ -314,6 +310,7 @@ def _agent_middleware(
             items.append(
                 MemoryCuratorMiddleware(layer, agent_runtime=agent_runtime)
             )
+    items.extend(resolve_agent_middleware(settings=agent_settings))
     if extra:
         items.extend(extra)
     return items
@@ -682,7 +679,7 @@ def _child_config(config, app_label: str):
 
 
 def _subagent_payload(query: str, config) -> dict:
-    """Forward CopilotKit frontend tools/context into nested domain agents."""
+    """Forward host frontend tools/context into nested domain agents."""
     payload: dict = {"messages": [{"role": "user", "content": query}]}
     copilotkit = _copilotkit_from_config(config)
     if copilotkit is not None:

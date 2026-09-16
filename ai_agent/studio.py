@@ -13,8 +13,8 @@ port mapping) or set ``AI_AGENT_STUDIO_DB_HOST=127.0.0.1``.
     langgraph dev
 
 Studio: https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024
-CopilotKit AG-UI: http://127.0.0.1:2024/copilotkit
-Production: https://agent.<DOMAIN_NAME>/copilotkit
+AG-UI: http://127.0.0.1:2024/agui
+Production: https://agent.<DOMAIN_NAME>/agui
 
 Every request except GET /ok requires the product JWT:
 
@@ -47,7 +47,7 @@ from ai_agent.conf import assert_production_studio_safe, get_agent_settings  # n
 
 assert_production_studio_safe()
 
-from ai_agent.graph import build_copilotkit_http_app  # noqa: E402
+from ai_agent.graph import build_agui_http_app  # noqa: E402
 from ai_agent.runtime import AgentRuntime  # noqa: E402
 
 agent_runtime = AgentRuntime.create(
@@ -58,4 +58,4 @@ agent_runtime = AgentRuntime.create(
 graph = agent_runtime.supervisor()
 memory = agent_runtime.memory_graph()
 memory_curator = agent_runtime.curator_graph()
-app = build_copilotkit_http_app(graph)
+app = build_agui_http_app(graph)

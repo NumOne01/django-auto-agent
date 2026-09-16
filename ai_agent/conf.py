@@ -86,6 +86,7 @@ class AgentSettings:
     http_trusted_proxy_count: int
     authenticate_token: object
     eval_module: str
+    middleware: tuple
     platform: PlatformConfig
 
     def is_memory_hot(self) -> bool:
@@ -189,6 +190,7 @@ def get_agent_settings(*, raw: dict | None = None) -> AgentSettings:
         ),
         authenticate_token=_as_authenticate_token(raw.get("AUTHENTICATE_TOKEN")),
         eval_module=str(raw.get("EVAL_MODULE") or "").strip(),
+        middleware=_as_middleware_tuple(raw.get("MIDDLEWARE")),
         platform=_platform_config(raw),
     )
 
@@ -265,6 +267,12 @@ def resolve_authenticate_token(*, raw: dict | None = None):
             "AI_AGENT.AUTHENTICATE_TOKEN must be a callable or dotted path to one."
         )
     return loaded
+
+
+def resolve_agent_middleware(*, raw: dict | None = None, settings=None):
+    """Instantiate ``AI_AGENT.MIDDLEWARE`` entries at graph-build time."""
+    agent_settings = settings or get_agent_settings(raw=raw)
+    return [_instantiate_middleware(item) for item in agent_settings.middleware]
 
 
 def resolve_studio_django_settings_module() -> str:
@@ -372,6 +380,51 @@ def _as_authenticate_token(raw):
     if not isinstance(raw, str) and callable(raw):
         return raw
     return str(raw or "").strip()
+
+
+def _as_middleware_tuple(raw) -> tuple:
+    if raw is None or raw == "":
+        return ()
+    if isinstance(raw, str):
+        return tuple(part.strip() for part in raw.split(",") if part.strip())
+    if isinstance(raw, (list, tuple)):
+        return tuple(item for item in raw if item not in (None, ""))
+    return ()
+
+
+def _instantiate_middleware(item):
+    import inspect
+
+    from django.core.exceptions import ImproperlyConfigured
+    from django.utils.module_loading import import_string
+
+    if isinstance(item, str):
+        path = item.strip()
+        if not path:
+            raise ImproperlyConfigured("AI_AGENT.MIDDLEWARE contains an empty path.")
+        try:
+            item = import_string(path)
+        except ImportError as exc:
+            raise ImproperlyConfigured(
+                f"AI_AGENT.MIDDLEWARE {path!r} could not be imported."
+            ) from exc
+    if inspect.isclass(item):
+        try:
+            return item()
+        except Exception as exc:
+            raise ImproperlyConfigured(
+                f"AI_AGENT.MIDDLEWARE {item!r} could not be instantiated."
+            ) from exc
+    if inspect.isfunction(item) or inspect.ismethod(item):
+        try:
+            return item()
+        except Exception as exc:
+            raise ImproperlyConfigured(
+                f"AI_AGENT.MIDDLEWARE {item!r} could not be called."
+            ) from exc
+    if item is None:
+        raise ImproperlyConfigured("AI_AGENT.MIDDLEWARE contains a null entry.")
+    return item
 
 
 def _as_http_throttle(raw) -> str:

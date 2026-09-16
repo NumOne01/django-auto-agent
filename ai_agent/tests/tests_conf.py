@@ -10,6 +10,7 @@ from ai_agent.conf import (
     get_agent_settings,
     join_en,
     labeled_terms,
+    resolve_agent_middleware,
     resolve_authenticate_token,
     resolve_eval_module,
     resolve_studio_django_settings_module,
@@ -36,6 +37,7 @@ class AgentSettingsFactoryTests(SimpleTestCase):
         self.assertEqual(parsed.subagent_model, "")
         self.assertEqual(parsed.memory_embeddings, "")
         self.assertEqual(parsed.authenticate_token, "")
+        self.assertEqual(parsed.middleware, ())
 
     def test_platform_defaults_when_omitted(self):
         parsed = get_agent_settings(raw={"SUPERVISOR_MODEL": "openai:x"})
@@ -109,6 +111,67 @@ class AgentSettingsFactoryTests(SimpleTestCase):
         self.assertEqual(parsed.eval_module, "dummy.evals")
         self.assertEqual(parsed.http_trusted_proxy_count, 2)
         self.assertEqual(resolve_eval_module(raw={"EVAL_MODULE": "dummy.evals"}).__name__, "dummy.evals")
+
+
+class MiddlewareSettingsTests(SimpleTestCase):
+    def test_empty_default(self):
+        parsed = get_agent_settings(raw={})
+        self.assertEqual(parsed.middleware, ())
+        self.assertEqual(resolve_agent_middleware(raw={}), [])
+
+    def test_comma_separated_paths(self):
+        parsed = get_agent_settings(
+            raw={"MIDDLEWARE": "ai_agent.safety.SafetyMiddleware, ai_agent.transcript.TranscriptMiddleware"}
+        )
+        self.assertEqual(
+            parsed.middleware,
+            (
+                "ai_agent.safety.SafetyMiddleware",
+                "ai_agent.transcript.TranscriptMiddleware",
+            ),
+        )
+
+    def test_list_of_paths_and_classes(self):
+        from ai_agent.safety import SafetyMiddleware
+
+        parsed = get_agent_settings(
+            raw={"MIDDLEWARE": ["ai_agent.safety.SafetyMiddleware", SafetyMiddleware]}
+        )
+        self.assertEqual(parsed.middleware[0], "ai_agent.safety.SafetyMiddleware")
+        self.assertIs(parsed.middleware[1], SafetyMiddleware)
+
+    def test_resolves_dotted_path(self):
+        from ai_agent.safety import SafetyMiddleware
+
+        resolved = resolve_agent_middleware(
+            raw={"MIDDLEWARE": ["ai_agent.safety.SafetyMiddleware"]}
+        )
+        self.assertEqual(len(resolved), 1)
+        self.assertIsInstance(resolved[0], SafetyMiddleware)
+
+    def test_resolves_class_and_instance(self):
+        from ai_agent.safety import SafetyMiddleware
+
+        instance = SafetyMiddleware()
+        resolved = resolve_agent_middleware(
+            raw={"MIDDLEWARE": [SafetyMiddleware, instance]}
+        )
+        self.assertIsInstance(resolved[0], SafetyMiddleware)
+        self.assertIs(resolved[1], instance)
+
+    def test_resolves_factory_function(self):
+        marker = object()
+
+        def _factory():
+            return marker
+
+        resolved = resolve_agent_middleware(raw={"MIDDLEWARE": [_factory]})
+        self.assertIs(resolved[0], marker)
+
+    def test_bad_path_raises(self):
+        with self.assertRaises(ImproperlyConfigured) as caught:
+            resolve_agent_middleware(raw={"MIDDLEWARE": ["ai_agent.tests.missing.Nope"]})
+        self.assertIn("MIDDLEWARE", str(caught.exception))
 
 
 class StudioDjangoSettingsTests(SimpleTestCase):

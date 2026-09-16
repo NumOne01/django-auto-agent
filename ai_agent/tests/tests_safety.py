@@ -115,7 +115,7 @@ class SafetyPromptTests(TestCase):
         with override_settings(AI_AGENT=_agent_settings()):
             kinds = [type(item).__name__ for item in _agent_middleware()]
         self.assertIn("SafetyMiddleware", kinds)
-        self.assertLess(kinds.index("SafetyMiddleware"), kinds.index("CopilotKitMiddleware"))
+        self.assertNotIn("CopilotKitMiddleware", kinds)
 
     def test_supervisor_and_domain_prompts_include_policy(self):
         supervisor = _supervisor_prompt(["- call_wallet_agent: wallet"])

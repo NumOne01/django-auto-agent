@@ -4,16 +4,14 @@ LangChain stores the retry-wrapped summarizer on the private ``_summary_model``
 attribute after ``with_retry()``. There is no public quiet-summarizer hook, so
 this module subclasses the middleware and wraps that runnable after init.
 
-The wrapper injects CopilotKit ``emit_messages=False`` / ``emit_tool_calls=False``
-(public ``copilotkit_customize_config``) and the unprefixed AG-UI metadata keys
-so summarizer tokens are not streamed into chat UIs.
+The wrapper sets AG-UI ``emit-messages`` / ``emit-tool-calls`` metadata so
+summarizer tokens are not streamed into chat UIs.
 """
 
 from __future__ import annotations
 
 import logging
 
-from copilotkit.langgraph import copilotkit_customize_config
 from langchain.agents.middleware import SummarizationMiddleware
 
 from ai_agent.conf import get_agent_settings
@@ -40,7 +38,7 @@ def build_compaction_middleware(agent_settings=None):
 
 
 class _QuietSummarizationMiddleware(SummarizationMiddleware):
-    """SummarizationMiddleware that suppresses CopilotKit/AG-UI token streaming.
+    """SummarizationMiddleware that suppresses AG-UI token streaming.
 
     Must wrap ``_summary_model`` *after* ``super().__init__`` so the quiet
     wrapper sits on the retry runnable LangChain actually invokes.
@@ -52,12 +50,12 @@ class _QuietSummarizationMiddleware(SummarizationMiddleware):
 
 
 def _silence_summarizer_stream(middleware):
-    """Hide summarizer tokens from CopilotKit/AG-UI chat streaming."""
+    """Hide summarizer tokens from AG-UI chat streaming."""
     inner = getattr(middleware, "_summary_model", None)
     if inner is None:
         logger.warning(
             "SummarizationMiddleware has no _summary_model; "
-            "summarizer tokens may stream to CopilotKit/AG-UI"
+            "summarizer tokens may stream to AG-UI"
         )
         return middleware
     middleware._summary_model = _QuietSummaryModel(inner)
@@ -65,23 +63,16 @@ def _silence_summarizer_stream(middleware):
 
 
 def _quiet_summary_config(config=None):
-    """Mark the summarizer call so CopilotKit and ag-ui-langgraph drop it.
+    """Mark the summarizer call so ag-ui-langgraph drops it.
 
-    CopilotKit's wrapper filters ``copilotkit:emit-messages``; ag-ui-langgraph
-    filters the unprefixed ``emit-messages`` key. Set both.
+    ag-ui-langgraph filters the unprefixed ``emit-messages`` /
+    ``emit-tool-calls`` metadata keys.
     """
     base = dict(config) if isinstance(config, dict) else {}
     metadata = dict(base.get("metadata") or {})
-    base["metadata"] = metadata
-    customized = copilotkit_customize_config(
-        base,
-        emit_messages=False,
-        emit_tool_calls=False,
-    )
-    metadata = dict(customized.get("metadata") or {})
     metadata[AGUI_EMIT_MESSAGES] = False
     metadata[AGUI_EMIT_TOOL_CALLS] = False
-    return {**customized, "metadata": metadata}
+    return {**base, "metadata": metadata}
 
 
 class _QuietSummaryModel:

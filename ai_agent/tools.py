@@ -61,9 +61,9 @@ def build_tool(endpoint: DiscoveredEndpoint) -> StructuredTool:
 def _resume_is_approved(value) -> bool:
     """True only for an explicit HITL approval.
 
-    CopilotKit ``useInterrupt`` resumes with ``{approved: bool}`` (or a
-    cancelled sentinel), not a bare boolean. Unknown shapes fail closed so a
-    mutation cannot proceed from a reject payload.
+    AG-UI resumes with ``{approved: bool}`` (or a cancelled sentinel), not a
+    bare boolean. Unknown shapes fail closed so a mutation cannot proceed
+    from a reject payload.
     """
     if isinstance(value, (list, tuple)):
         if not value:

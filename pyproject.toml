@@ -13,7 +13,7 @@ requires-python = ">=3.11"
 authors = [
     { name = "Alireza fz" },
 ]
-keywords = ["django", "djangorestframework", "langgraph", "agent", "copilotkit"]
+keywords = ["django", "djangorestframework", "langgraph", "agent", "ag-ui"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Web Environment",
@@ -44,7 +44,7 @@ dependencies = [
     "langmem>=0.0.29",
     "psycopg[binary]>=3.1.0",
     "psycopg-pool>=3.2.0",
-    "copilotkit>=0.1.96",
+    "ag-ui-langgraph",
 ]
 
 [project.optional-dependencies]

@@ -134,13 +134,12 @@ class LimitsEnabledTests(TestCase):
             items = _agent_middleware(layer="supervisor")
         kinds = [type(item).__name__ for item in items]
         self.assertEqual(kinds[2], "SafetyMiddleware")
-        self.assertEqual(kinds[3], "CopilotKitMiddleware")
-        self.assertEqual(kinds[4], "TranscriptMiddleware")
-        self.assertEqual(kinds[5], "ModelCallLimitMiddleware")
-        self.assertEqual(kinds[6], "RunTimeoutMiddleware")
-        self.assertIs(items[7], fake)
-        self.assertEqual(kinds[8], "MemoryRecallMiddleware")
-        self.assertEqual(kinds[9], "MemoryWriteMiddleware")
+        self.assertEqual(kinds[3], "TranscriptMiddleware")
+        self.assertEqual(kinds[4], "ModelCallLimitMiddleware")
+        self.assertEqual(kinds[5], "RunTimeoutMiddleware")
+        self.assertIs(items[6], fake)
+        self.assertEqual(kinds[7], "MemoryRecallMiddleware")
+        self.assertEqual(kinds[8], "MemoryWriteMiddleware")
 
 
 class LimitsConfigTests(TestCase):

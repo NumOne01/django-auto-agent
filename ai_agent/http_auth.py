@@ -1,4 +1,4 @@
-"""FastAPI Bearer gate for the CopilotKit AG-UI mount."""
+"""FastAPI Bearer gate for the AG-UI HTTP mount."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ async def require_bearer_user(
     request: Request,
     authorization: Optional[str] = Header(default=None),
 ):
-    """Reject CopilotKit requests that do not carry a valid product JWT.
+    """Reject AG-UI requests that do not carry a valid product JWT.
 
     OPTIONS is skipped so browser CORS preflight can succeed without a token.
     """

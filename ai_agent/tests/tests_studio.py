@@ -167,21 +167,19 @@ class AgentUserMiddlewareTests(TestCase):
         self.assertIsNone(peek_current_user())
 
 
-class CopilotKitWiringTests(TestCase):
+class AguiWiringTests(TestCase):
     def setUp(self):
         patcher = override_settings(AI_AGENT=offline_agent_settings())
         patcher.enable()
         self.addCleanup(patcher.disable)
 
-    def test_agent_middleware_includes_copilotkit(self):
-        from copilotkit import CopilotKitMiddleware
-
+    def test_agent_middleware_does_not_include_copilotkit(self):
         from ai_agent.graph import _agent_middleware
 
-        kinds = [type(item) for item in _agent_middleware()]
-        self.assertIn(CopilotKitMiddleware, kinds)
+        kinds = [type(item).__name__ for item in _agent_middleware()]
+        self.assertNotIn("CopilotKitMiddleware", kinds)
 
-    def test_studio_graph_builds_with_copilotkit_state(self):
+    def test_studio_graph_builds_without_copilotkit_state(self):
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
         from langgraph.pregel import Pregel
 
@@ -190,20 +188,40 @@ class CopilotKitWiringTests(TestCase):
         graph = build_studio_graph(model=FakeListChatModel(responses=["ok"]))
         self.assertIsInstance(graph, Pregel)
         channels = getattr(graph, "channels", None) or {}
-        self.assertIn("copilotkit", channels)
+        self.assertNotIn("copilotkit", channels)
 
-    def test_copilotkit_http_app_exposes_agui_route(self):
+    def test_agui_http_app_exposes_agui_route(self):
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-        from ai_agent.graph import build_copilotkit_http_app, build_studio_graph
+        from ai_agent.graph import build_agui_http_app, build_studio_graph
 
         graph = build_studio_graph(model=FakeListChatModel(responses=["ok"]))
-        app = build_copilotkit_http_app(graph)
+        app = build_agui_http_app(graph)
         paths = [getattr(route, "path", "") for route in app.routes]
-        self.assertTrue(
-            any("/copilotkit" in path for path in paths),
-            paths,
-        )
+        self.assertTrue(any("/agui" in path for path in paths), paths)
+        self.assertFalse(any("/copilotkit" in path for path in paths), paths)
+
+    def test_agui_http_app_uses_langgraph_agent(self):
+        from unittest.mock import MagicMock, patch
+
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        from ai_agent.graph import build_agui_http_app, build_studio_graph
+
+        graph = build_studio_graph(model=FakeListChatModel(responses=["ok"]))
+        with (
+            patch("ag_ui_langgraph.LangGraphAgent") as agent_cls,
+            patch("ag_ui_langgraph.add_langgraph_fastapi_endpoint") as add_endpoint,
+        ):
+            agent_cls.return_value = MagicMock(name="langgraph-agent")
+            app = build_agui_http_app(graph)
+        add_endpoint.assert_called_once()
+        self.assertEqual(add_endpoint.call_args.kwargs["path"], "/agui")
+        self.assertIs(add_endpoint.call_args.kwargs["agent"], agent_cls.return_value)
+        self.assertIs(add_endpoint.call_args.kwargs["app"], app)
+        agent_cls.assert_called_once()
+        self.assertEqual(agent_cls.call_args.kwargs["name"], "assistant")
+        self.assertIs(agent_cls.call_args.kwargs["graph"], graph)
 
     def test_subagent_payload_forwards_copilotkit_state(self):
         from ai_agent.graph import _subagent_payload

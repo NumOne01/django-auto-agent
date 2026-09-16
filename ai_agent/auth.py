@@ -118,7 +118,7 @@ async def on_threads(ctx: Auth.types.AuthContext, value: dict):
 async def on_assistants(ctx: Auth.types.AuthContext, value: dict):
     """Let authenticated users read the built-in graph. Do not filter by owner.
 
-    CopilotKit / LangGraphHttpAgent calls ``assistants.search({ graphId })``.
+    AG-UI clients and LangGraph Studio/SDK call ``assistants.search({ graphId })``.
     The graph registered in langgraph.json has no ``owner`` metadata, so an
     owner filter would return an empty list and surface
     ``No agent found with graph ID assistant``.
