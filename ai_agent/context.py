@@ -101,8 +101,9 @@ def resolve_agent_user(config=None):
     from django.conf import settings
 
     from ai_agent.conf import get_agent_settings
+    from ai_agent.db import refresh_db_connections
 
-    _refresh_db_connections()
+    refresh_db_connections()
     cfg = _configurable(config)
     auth_user_id = _auth_user_id(cfg)
     if auth_user_id not in (None, ""):
@@ -163,16 +164,6 @@ def _missing_user_message() -> str:
     return (
         "No authenticated AI agent user. Send Authorization: Bearer <access_token>."
     )
-
-
-def _refresh_db_connections():
-    """Drop stale Studio connections. Skip in Django tests (SQLite TestCase)."""
-    from django.conf import settings
-    from django.db import close_old_connections
-
-    if getattr(settings, "TESTING", False):
-        return
-    close_old_connections()
 
 
 def _user_not_found_message(*, user_id=None, phone=None) -> str:

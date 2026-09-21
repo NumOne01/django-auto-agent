@@ -67,8 +67,14 @@ async def authenticate(
     _ensure_django()
     authenticate_token = resolve_authenticate_token()
 
+    def _authenticate_sync(token):
+        from ai_agent.db import refresh_db_connections
+
+        refresh_db_connections()
+        return authenticate_token(token)
+
     try:
-        user = await sync_to_async(authenticate_token, thread_sensitive=True)(token)
+        user = await sync_to_async(_authenticate_sync, thread_sensitive=True)(token)
     except ImproperlyConfigured:
         raise
     except Exception as exc:

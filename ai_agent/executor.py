@@ -17,11 +17,9 @@ logger = logging.getLogger(__name__)
 
 
 def invoke_endpoint(endpoint: DiscoveredEndpoint, user, arguments: dict | None = None) -> str:
-    from django.conf import settings
-    from django.db import close_old_connections
+    from ai_agent.db import refresh_db_connections
 
-    if not getattr(settings, "TESTING", False):
-        close_old_connections()
+    refresh_db_connections()
     arguments = {k: v for k, v in (arguments or {}).items() if v is not None}
     try:
         path_kwargs = _coerce_path_kwargs(endpoint, arguments)

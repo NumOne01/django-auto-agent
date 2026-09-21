@@ -1,7 +1,7 @@
 """LangGraph JWT auth handlers and AG-UI Bearer gate."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from asgiref.sync import async_to_sync
 from django.contrib.auth import get_user_model
@@ -90,6 +90,54 @@ class LangGraphAuthenticateTests(TestCase):
         self.assertEqual(result["identity"], str(self.user.pk))
         self.assertEqual(result["display_name"], "Ada Agent")
         self.assertTrue(result["is_authenticated"])
+
+    def test_healthcheck_skips_token_and_db_refresh(self):
+        with patch("django.db.close_old_connections") as close, patch(
+            "ai_agent.conf.resolve_authenticate_token"
+        ) as resolve, patch("ai_agent.db.refresh_db_connections") as refresh:
+            result = async_to_sync(authenticate)(
+                authorization=None, path="/ok", method="GET"
+            )
+        self.assertEqual(result["identity"], HEALTHCHECK_IDENTITY)
+        close.assert_not_called()
+        refresh.assert_not_called()
+        resolve.assert_not_called()
+
+    def test_valid_token_refreshes_db_before_authenticate_token(self):
+        call_order = []
+
+        def close_old_connections():
+            call_order.append("refresh")
+
+        def authenticate_token(token):
+            call_order.append("authenticate")
+            user = User.objects.filter(username=token).first()
+            if user is None:
+                raise ValueError("Invalid token")
+            return user
+
+        with override_settings(
+            TESTING=False,
+            AI_AGENT=_offline_agent_settings(AUTHENTICATE_TOKEN=authenticate_token),
+        ), patch("django.db.close_old_connections", side_effect=close_old_connections):
+            result = async_to_sync(authenticate)(
+                authorization=f"Bearer {self.user.username}",
+                path="/threads",
+                method="POST",
+            )
+        self.assertEqual(call_order, ["refresh", "authenticate"])
+        self.assertEqual(result["identity"], str(self.user.pk))
+        self.assertTrue(result["is_authenticated"])
+
+    def test_invalid_token_is_unauthorized_after_db_refresh(self):
+        with override_settings(TESTING=False), patch("django.db.close_old_connections"):
+            with self.assertRaises(Auth.exceptions.HTTPException) as caught:
+                async_to_sync(authenticate)(
+                    authorization="Bearer not-a-jwt",
+                    path="/threads",
+                    method="GET",
+                )
+        self.assertEqual(caught.exception.status_code, 401)
 
     def test_display_name_uses_username_then_generic_fallback(self):
         nameless = User.objects.create_user(
@@ -235,6 +283,43 @@ class AguiAuthGateTests(TestCase):
                 headers={"Authorization": "Bearer not-a-jwt"},
             )
         self.assertEqual(response.status_code, 401)
+
+
+class AguiBearerDbRefreshTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="agui_db",
+            password="pass12345",
+        )
+
+    def test_require_bearer_user_refreshes_db_before_authenticate_token(self):
+        from ai_agent.http_auth import require_bearer_user
+
+        call_order = []
+
+        def close_old_connections():
+            call_order.append("refresh")
+
+        def authenticate_token(token):
+            call_order.append("authenticate")
+            if token == self.user.username:
+                return self.user
+            raise ValueError("Invalid token")
+
+        request = SimpleNamespace(
+            method="POST",
+            headers={},
+            client=SimpleNamespace(host="203.0.113.9"),
+        )
+        with override_settings(
+            TESTING=False,
+            AI_AGENT=_offline_agent_settings(AUTHENTICATE_TOKEN=authenticate_token),
+        ), patch("django.db.close_old_connections", side_effect=close_old_connections):
+            result = async_to_sync(require_bearer_user)(
+                request, authorization=f"Bearer {self.user.username}"
+            )
+        self.assertEqual(result.pk, self.user.pk)
+        self.assertEqual(call_order, ["refresh", "authenticate"])
 
 
 class HttpThrottleTests(TestCase):

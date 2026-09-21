@@ -40,8 +40,15 @@ async def require_bearer_user(
     from ai_agent.conf import resolve_authenticate_token
 
     authenticate_token = resolve_authenticate_token()
+
+    def _authenticate_sync(token):
+        from ai_agent.db import refresh_db_connections
+
+        refresh_db_connections()
+        return authenticate_token(token)
+
     try:
-        return await sync_to_async(authenticate_token, thread_sensitive=True)(token)
+        return await sync_to_async(_authenticate_sync, thread_sensitive=True)(token)
     except (ImproperlyConfigured, HTTPException):
         raise
     except Exception as exc:

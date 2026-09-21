@@ -6,7 +6,7 @@ import hashlib
 import logging
 
 from asgiref.sync import sync_to_async
-from django.db import IntegrityError, close_old_connections
+from django.db import IntegrityError
 from langchain.agents.middleware import AgentMiddleware
 
 from ai_agent.memory.namespaces import user_id_from_config
@@ -82,7 +82,9 @@ def visible_transcript_rows(messages) -> list[dict]:
 def _save_rows(*, user_id, thread_id: str, rows: list[dict]) -> int:
     from django.contrib.auth import get_user_model
 
-    close_old_connections()
+    from ai_agent.db import refresh_db_connections
+
+    refresh_db_connections()
     User = get_user_model()
     try:
         user = User.objects.filter(pk=user_id).first()
