@@ -8,9 +8,11 @@ from asgiref.sync import async_to_sync
 from django.conf import settings
 from django.test import TestCase, override_settings
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphInterrupt, GraphRecursionError
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.types import Interrupt
 
 from ai_agent.conf import get_agent_settings
@@ -203,6 +205,20 @@ class GraphHookTests(TestCase):
             recursion_limit_for_max_turn(get_agent_settings().max_turn),
         )
 
+    def test_child_config_detaches_parent_stream(self):
+        config = _child_config(
+            {
+                "callbacks": [object()],
+                "configurable": {
+                    "thread_id": "t-wallet",
+                    "__pregel_stream": object(),
+                },
+            },
+            "wallet",
+        )
+        self.assertIsNone(config["callbacks"])
+        self.assertNotIn("__pregel_stream", config["configurable"])
+
     def test_child_config_overrides_parent_recursion_limit(self):
         config = _child_config(
             {
@@ -324,6 +340,39 @@ class GraphHookTests(TestCase):
                 async_to_sync(tool.ainvoke)({"query": "open a ticket"})
         finally:
             var_child_runnable_config.reset(token)
+
+    def test_wrap_subagent_keeps_child_out_of_parent_events(self):
+        child = StateGraph(MessagesState)
+        child.add_node(
+            "specialist_step",
+            lambda _state: {"messages": [AIMessage("specialist answer")]},
+        )
+        child.add_edge(START, "specialist_step")
+        child.add_edge("specialist_step", END)
+        tool = _wrap_subagent("wallet", "wallet blurb", child.compile())
+
+        async def supervisor_step(_state):
+            answer = await tool.ainvoke({"query": "balance"})
+            return {"messages": [AIMessage(answer)]}
+
+        parent = StateGraph(MessagesState)
+        parent.add_node("supervisor_step", supervisor_step)
+        parent.add_edge(START, "supervisor_step")
+        parent.add_edge("supervisor_step", END)
+
+        async def collect():
+            names = []
+            async for event in parent.compile().astream_events(
+                {"messages": []},
+                {"configurable": {"thread_id": "t-events"}},
+                version="v2",
+            ):
+                names.append(event["name"])
+            return names
+
+        names = async_to_sync(collect)()
+        self.assertIn(subagent_tool_name("wallet"), names)
+        self.assertNotIn("specialist_step", names)
 
     def test_domain_agent_builds_with_fake_model(self):
         graph = build_domain_agent(

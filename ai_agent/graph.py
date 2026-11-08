@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from typing import Optional
 
 from django.apps import apps
@@ -40,6 +41,10 @@ TOOL_FAILURE_MESSAGE = (
 )
 
 WrapSubagent = Callable[[str, str, object], StructuredTool]
+
+# LangGraph's private CONFIG_KEY_STREAM: a nested graph that finds it in
+# ``configurable`` writes its own output into the parent run's stream.
+PARENT_STREAM_KEY = "__pregel_stream"
 
 
 def build_supervisor(
@@ -651,7 +656,10 @@ def _wrap_subagent(app_label: str, blurb: str, subagent) -> StructuredTool:
         parent_config = var_child_runnable_config.get()
         config = _child_config(parent_config, app_label)
         try:
-            result = subagent.invoke(_subagent_payload(query, parent_config), config)
+            with _detached_from_parent_run():
+                result = subagent.invoke(
+                    _subagent_payload(query, parent_config), config
+                )
         except GraphBubbleUp:
             raise
         except Exception:
@@ -665,9 +673,10 @@ def _wrap_subagent(app_label: str, blurb: str, subagent) -> StructuredTool:
         parent_config = var_child_runnable_config.get()
         config = _child_config(parent_config, app_label)
         try:
-            result = await subagent.ainvoke(
-                _subagent_payload(query, parent_config), config
-            )
+            with _detached_from_parent_run():
+                result = await subagent.ainvoke(
+                    _subagent_payload(query, parent_config), config
+                )
         except GraphBubbleUp:
             raise
         except Exception:
@@ -764,13 +773,36 @@ def _child_config(config, app_label: str):
         configurable["checkpoint_ns"] = ""
         configurable.pop("checkpoint_id", None)
         configurable.pop("checkpoint_map", None)
+    # The parent's stream and callbacks feed its AG-UI events. Inherited,
+    # they put the specialist's own tool calls and draft answer in the chat
+    # next to the supervisor's reply, under the root namespace since the
+    # child runs at checkpoint_ns "". Run under _detached_from_parent_run so
+    # the ambient config does not merge the callbacks back in.
+    configurable.pop(PARENT_STREAM_KEY, None)
     from ai_agent.memory.namespaces import normalize_memory_config
 
     return bind_recursion_limit(
         normalize_memory_config(
-            {**config, "configurable": configurable}, app_label
+            {**config, "configurable": configurable, "callbacks": None},
+            app_label,
         )
     )
+
+
+@contextmanager
+def _detached_from_parent_run() -> Iterator[None]:
+    """Hide the ambient parent config from a nested invoke.
+
+    LangGraph's ``ensure_config`` merges the explicit callbacks with the
+    ambient ones, so no value in ``_child_config`` alone can drop the
+    parent's event handlers. The explicit child config carries everything
+    else the nested run needs.
+    """
+    token = var_child_runnable_config.set(None)
+    try:
+        yield
+    finally:
+        var_child_runnable_config.reset(token)
 
 
 def _subagent_payload(query: str, config) -> dict:
