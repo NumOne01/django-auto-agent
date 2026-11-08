@@ -67,7 +67,7 @@ flowchart LR
   Agent --> Thread
 ```
 
-**Compaction** (`COMPACTION_ENABLED`) is still short-term: it shrinks the checkpoint when the trigger (tokens, messages, or a fraction of context) is hit, keeping a recent window (`COMPACTION_KEEP`) and replacing older turns with a summary. Summarizer tokens are not streamed to AG-UI. Compacted checkpoints are **not** what `GET threads/<id>/messages/` returns; that API reads `AgentMessage`, which stores user-visible supervisor text and ignores compaction summaries.
+**Compaction** (`COMPACTION_ENABLED`) is still short-term: it shrinks the checkpoint when the trigger (tokens, messages, or a fraction of context) is hit, keeping a recent window (`COMPACTION_KEEP`) and replacing older turns with a summary. Summarizer tokens are not streamed to AG-UI. Compacted checkpoints are **not** what `GET threads/<id>/messages/` returns; that API reads `AgentMessage`, which stores the supervisor's user-visible turns (text, tool calls and tool results) and ignores compaction summaries.
 
 Under tests or SQLite the checkpointer is in-memory. On the Agent Server, persistence is the platform/Postgres checkpointer for that deployment.
 
@@ -141,7 +141,7 @@ The optimizer is on by default when memory is on, except under Django `TESTING`.
 
 **Chat HTTP API.** Include `ai_agent.urls` for thread list, per-thread messages, and memory list/get/delete. Those views are `@agent_exclude`d so the agent cannot call them as tools.
 
-**Transcripts.** User-visible supervisor turns are stored in `AgentMessage`, independent of compacted LangGraph checkpoints. The product chat history API reads that table, not the checkpointer.
+**Transcripts.** User-visible supervisor turns, including tool calls and their results, are stored in `AgentMessage`, independent of compacted LangGraph checkpoints. The product chat history API reads that table, not the checkpointer.
 
 **Long-term memory.** Off until `MEMORY_ENABLED`. Background mode writes after the turn; hot mode also exposes manage/search tools on the conversation agents. Each layer (supervisor plus each opted-in app) has a profile, semantic facts, episodes, a local playbook, and prompt overlays. A curator reconciles duplicates and caps; a prompt optimizer can write local and global overlays from episodes.
 
@@ -493,14 +493,14 @@ urlpatterns = [
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `threads/` | This user's threads, latest preview from `AgentMessage`. |
-| `GET` | `threads/<thread_id>/messages/` | User-visible turns for one thread (no tool calls, no compaction summaries). |
+| `GET` | `threads/<thread_id>/messages/` | User-visible turns for one thread, with tool calls and results (no compaction summaries). |
 | `GET` | `memories/` | Profile and semantic memories (`?layer=` optional). |
 | `GET` | `memories/<layer>/<kind>/<key>/` | One profile or semantic document. |
 | `DELETE` | `memories/<layer>/<kind>/<key>/` | Delete that document. |
 
 All require Django `IsAuthenticated`. Episodes, playbooks, and prompt overlays are not listed on this API. If the memory store is off or unreachable, memory endpoints return HTTP 503.
 
-`TranscriptMiddleware` writes human/assistant text from the supervisor turn into `AgentMessage` (unique on `thread_id` + `external_id`). Compaction summaries and nested subagent thread ids are skipped, so product history survives summarization.
+`TranscriptMiddleware` writes the supervisor turn into `AgentMessage` (unique on `thread_id` + `external_id`, the LangGraph message id). User and assistant text are stored as `content`; assistant tool calls as `tool_calls` (`[{id, name, args}]`); tool results as `role: "tool"` rows with `tool_call_id`, so a UI can redraw tool cards from history. Compaction summaries and nested subagent thread ids are skipped, so product history survives summarization. Thread previews use the latest user or assistant text.
 
 ### Memory layers
 

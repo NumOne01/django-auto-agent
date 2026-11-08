@@ -43,7 +43,11 @@ def list_agent_threads(request):
 
 def _thread_summaries(user):
     """Latest message per thread. DISTINCT ON on Postgres; subquery elsewhere."""
-    qs = AgentMessage.objects.filter(user=user)
+    qs = (
+        AgentMessage.objects.filter(user=user)
+        .exclude(role=AgentMessage.ROLE_TOOL)
+        .exclude(content="")
+    )
     if connection.features.can_distinct_on_fields:
         latest_pks = (
             qs.order_by("thread_id", "-created_at", "-id")
@@ -73,8 +77,9 @@ def _thread_summaries(user):
     operation_id="list_agent_thread_messages",
     summary="List agent chat messages",
     description=(
-        "List user-visible messages for one of this user's threads. "
-        "Does not include compaction summaries or tool calls."
+        "List user-visible messages for one of this user's threads, including "
+        "supervisor tool calls and their results. Does not include compaction "
+        "summaries."
     ),
     tags=["AI Agent"],
     responses={200: AgentMessageSerializer(many=True)},

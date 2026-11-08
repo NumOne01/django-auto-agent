@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 
 from asgiref.sync import sync_to_async
@@ -19,7 +20,7 @@ _SUMMARY_PREFIX = "Here is a summary of the conversation to date:"
 
 
 class TranscriptMiddleware(AgentMiddleware):
-    """Write human/assistant text from the supervisor turn to AgentMessage."""
+    """Write the supervisor's visible turns, tool calls included, to AgentMessage."""
 
     def before_agent(self, state, runtime):
         persist_transcript(state, runtime)
@@ -61,19 +62,30 @@ _apersist_transcript = sync_to_async(persist_transcript, thread_sensitive=True)
 def visible_transcript_rows(messages) -> list[dict]:
     rows = []
     for message in messages or []:
-        if _is_summary(message) or _has_tool_calls(message):
+        if _is_summary(message):
             continue
         role = _role(message)
         if role is None:
             continue
         content = message_text(message).strip()
-        if not content:
+        tool_calls = _tool_calls(message) if role == AgentMessage.ROLE_ASSISTANT else []
+        tool_call_id = (
+            str(getattr(message, "tool_call_id", None) or "")[:128]
+            if role == AgentMessage.ROLE_TOOL
+            else ""
+        )
+        # A tool result marks its card complete even when it is empty.
+        if not content and not tool_calls and role != AgentMessage.ROLE_TOOL:
             continue
         rows.append(
             {
                 "role": role,
                 "content": content,
-                "external_id": _external_id(message, role, content),
+                "tool_calls": tool_calls,
+                "tool_call_id": tool_call_id,
+                "external_id": _external_id(
+                    message, role, content, tool_calls, tool_call_id
+                ),
             }
         )
     return rows
@@ -93,8 +105,25 @@ def _save_rows(*, user_id, thread_id: str, rows: list[dict]) -> int:
         return 0
     if user is None:
         return 0
+    saved = set(
+        AgentMessage.objects.filter(
+            thread_id=thread_id,
+            external_id__in=[row["external_id"] for row in rows],
+        ).values_list("external_id", flat=True)
+    )
+    last_saved = max(
+        (index for index, row in enumerate(rows) if row["external_id"] in saved),
+        default=-1,
+    )
     created = 0
-    for row in rows:
+    for index, row in enumerate(rows):
+        if row["external_id"] in saved:
+            continue
+        # History orders by created_at, so a row older than one already saved
+        # would show at the bottom. Happens for tool rows of threads saved
+        # before tool calls were stored.
+        if index < last_saved:
+            continue
         try:
             _, was_created = AgentMessage.objects.get_or_create(
                 thread_id=thread_id,
@@ -103,6 +132,8 @@ def _save_rows(*, user_id, thread_id: str, rows: list[dict]) -> int:
                     "user": user,
                     "role": row["role"],
                     "content": row["content"],
+                    "tool_calls": row["tool_calls"],
+                    "tool_call_id": row["tool_call_id"],
                 },
             )
         except IntegrityError:
@@ -124,9 +155,20 @@ def _is_summary(message) -> bool:
     return message_text(message).lstrip().startswith(_SUMMARY_PREFIX)
 
 
-def _has_tool_calls(message) -> bool:
-    calls = getattr(message, "tool_calls", None)
-    return bool(calls)
+def _tool_calls(message) -> list[dict]:
+    calls = []
+    for call in getattr(message, "tool_calls", None) or []:
+        if not isinstance(call, dict):
+            continue
+        calls.append(
+            {
+                "id": str(call.get("id") or ""),
+                "name": str(call.get("name") or ""),
+                # Args may hold datetimes or Decimals; JSONField needs plain JSON.
+                "args": json.loads(json.dumps(call.get("args") or {}, default=str)),
+            }
+        )
+    return calls
 
 
 def _role(message) -> str | None:
@@ -135,19 +177,31 @@ def _role(message) -> str | None:
         return AgentMessage.ROLE_USER
     if name.startswith("ai") or name == "aimessage":
         return AgentMessage.ROLE_ASSISTANT
+    if name.startswith("tool"):
+        return AgentMessage.ROLE_TOOL
     kind = str(getattr(message, "type", None) or getattr(message, "role", "")).lower()
     if kind in {"human", "user"}:
         return AgentMessage.ROLE_USER
     if kind in {"ai", "assistant"}:
         return AgentMessage.ROLE_ASSISTANT
+    if kind == "tool":
+        return AgentMessage.ROLE_TOOL
     return None
 
 
-def _external_id(message, role: str, content: str) -> str:
+def _external_id(
+    message, role: str, content: str, tool_calls: list[dict], tool_call_id: str
+) -> str:
     msg_id = getattr(message, "id", None)
     if msg_id not in (None, ""):
         return str(msg_id)[:128]
-    digest = hashlib.sha256(f"{role}:{content}".encode()).hexdigest()
+    key = f"{role}:{content}"
+    # Text-only keys stay as before so id-less rows already saved still match.
+    if tool_calls:
+        key += ":" + ",".join(call["id"] for call in tool_calls)
+    if tool_call_id:
+        key += f":{tool_call_id}"
+    digest = hashlib.sha256(key.encode()).hexdigest()
     return digest[:64]
 
 

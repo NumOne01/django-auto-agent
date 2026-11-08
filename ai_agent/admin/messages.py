@@ -15,6 +15,8 @@ class AgentMessageAdmin(admin.ModelAdmin):
         "thread_id",
         "role",
         "content",
+        "tool_calls",
+        "tool_call_id",
         "external_id",
         "created_at",
     )

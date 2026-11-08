@@ -48,7 +48,7 @@ class VisibleTranscriptTests(TestCase):
             ],
         )
 
-    def test_skips_summaries_and_tools(self):
+    def test_skips_summaries_and_keeps_tool_calls(self):
         rows = visible_transcript_rows(
             [
                 HumanMessage(
@@ -71,8 +71,33 @@ class VisibleTranscriptTests(TestCase):
                 HumanMessage(content="فامیل من فتحلی زاده ست", id="h2"),
             ]
         )
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["content"], "فامیل من فتحلی زاده ست")
+        self.assertEqual(
+            [(row["role"], row["external_id"]) for row in rows],
+            [("assistant", "tool-ai"), ("tool", "t1"), ("user", "h2")],
+        )
+        self.assertEqual(
+            rows[0]["tool_calls"],
+            [{"id": "c1", "name": "call_wallet_agent", "args": {"query": "balance"}}],
+        )
+        self.assertEqual(rows[0]["content"], "")
+        self.assertEqual(rows[1]["tool_call_id"], "c1")
+        self.assertEqual(rows[1]["content"], "ok")
+
+    def test_tool_args_become_plain_json(self):
+        from datetime import date
+
+        rows = visible_transcript_rows(
+            [
+                AIMessage(
+                    content="",
+                    id="a1",
+                    tool_calls=[
+                        {"name": "show_chart", "args": {"day": date(2026, 1, 2)}, "id": "c1"}
+                    ],
+                )
+            ]
+        )
+        self.assertEqual(rows[0]["tool_calls"][0]["args"], {"day": "2026-01-02"})
 
 
 class PersistTranscriptTests(TestCase):
@@ -128,6 +153,69 @@ class PersistTranscriptTests(TestCase):
         self.assertEqual(
             contents,
             ["سلام", "hello", "من در مونترال زندگی میکنم", "متوجه شدم"],
+        )
+
+    def test_saves_tool_calls_and_results(self):
+        state = {
+            "messages": [
+                HumanMessage(content="نمودار طلا", id="h1"),
+                AIMessage(
+                    content="",
+                    id="a1",
+                    tool_calls=[
+                        {"name": "show_chart", "args": {"title": "طلا"}, "id": "c1"}
+                    ],
+                ),
+                ToolMessage(content='{"rendered": true}', tool_call_id="c1", id="t1"),
+                AIMessage(content="این نمودار طلاست", id="a2"),
+            ]
+        }
+        self.assertEqual(persist_transcript(state, _Runtime(_config(self.user.pk))), 4)
+        rows = list(AgentMessage.objects.order_by("created_at", "id"))
+        self.assertEqual(
+            [item.role for item in rows], ["user", "assistant", "tool", "assistant"]
+        )
+        self.assertEqual(rows[1].tool_calls[0]["name"], "show_chart")
+        self.assertEqual(rows[2].tool_call_id, "c1")
+
+    def test_skips_unsaved_rows_older_than_saved_ones(self):
+        # Threads saved before tool calls were stored: their old tool rows would
+        # otherwise be created now and sort below the later text.
+        runtime = _Runtime(_config(self.user.pk))
+        for external_id, role, content in [
+            ("h1", AgentMessage.ROLE_USER, "سلام"),
+            ("a2", AgentMessage.ROLE_ASSISTANT, "موجودی ۱۰"),
+        ]:
+            AgentMessage.objects.create(
+                user=self.user,
+                thread_id="thread-1",
+                role=role,
+                content=content,
+                external_id=external_id,
+            )
+        persist_transcript(
+            {
+                "messages": [
+                    HumanMessage(content="سلام", id="h1"),
+                    AIMessage(
+                        content="",
+                        id="a1",
+                        tool_calls=[{"name": "wallet", "args": {}, "id": "c1"}],
+                    ),
+                    ToolMessage(content="10", tool_call_id="c1", id="t1"),
+                    AIMessage(content="موجودی ۱۰", id="a2"),
+                    HumanMessage(content="ممنون", id="h3"),
+                ]
+            },
+            runtime,
+        )
+        self.assertEqual(
+            list(
+                AgentMessage.objects.order_by("created_at", "id").values_list(
+                    "external_id", flat=True
+                )
+            ),
+            ["h1", "a2", "h3"],
         )
 
     def test_skips_child_threads_and_interrupts(self):
@@ -233,6 +321,35 @@ class AgentTranscriptAPITests(TestCase):
         messages = response.json()["messages"]
         self.assertEqual([item["role"] for item in messages], ["user", "assistant"])
         self.assertEqual(messages[0]["content"], "سلام")
+        self.assertEqual([item["external_id"] for item in messages], ["h1", "a1"])
+        self.assertEqual(messages[0]["tool_calls"], [])
+        self.assertEqual(messages[0]["tool_call_id"], "")
+
+    def test_returns_tool_calls_and_preview_skips_them(self):
+        AgentMessage.objects.create(
+            user=self.user,
+            thread_id="thread-a",
+            role=AgentMessage.ROLE_ASSISTANT,
+            content="",
+            tool_calls=[{"id": "c1", "name": "show_chart", "args": {"title": "x"}}],
+            external_id="a2",
+        )
+        AgentMessage.objects.create(
+            user=self.user,
+            thread_id="thread-a",
+            role=AgentMessage.ROLE_TOOL,
+            content="done",
+            tool_call_id="c1",
+            external_id="t1",
+        )
+        response = self.client.get("/api/agent/threads/thread-a/messages/")
+        messages = response.json()["messages"]
+        self.assertEqual(messages[2]["tool_calls"][0]["name"], "show_chart")
+        self.assertEqual(messages[3]["role"], "tool")
+        self.assertEqual(messages[3]["tool_call_id"], "c1")
+
+        threads = self.client.get("/api/agent/threads/").json()["threads"]
+        self.assertEqual(threads[0]["preview"], "hello")
 
     def test_thread_preview_is_latest_message(self):
         AgentMessage.objects.create(

@@ -6,7 +6,16 @@ from ai_agent.models import AgentMessage
 class AgentMessageSerializer(serializers.ModelSerializer):
     class Meta:
         model = AgentMessage
-        fields = ("id", "thread_id", "role", "content", "created_at")
+        fields = (
+            "id",
+            "external_id",
+            "thread_id",
+            "role",
+            "content",
+            "tool_calls",
+            "tool_call_id",
+            "created_at",
+        )
         read_only_fields = fields
 
 

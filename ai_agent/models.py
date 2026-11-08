@@ -37,9 +37,11 @@ class AgentMessage(models.Model):
 
     ROLE_USER = "user"
     ROLE_ASSISTANT = "assistant"
+    ROLE_TOOL = "tool"
     ROLE_CHOICES = (
         (ROLE_USER, "User"),
         (ROLE_ASSISTANT, "Assistant"),
+        (ROLE_TOOL, "Tool"),
     )
 
     user = models.ForeignKey(
@@ -49,7 +51,11 @@ class AgentMessage(models.Model):
     )
     thread_id = models.CharField(max_length=128, db_index=True)
     role = models.CharField(max_length=16, choices=ROLE_CHOICES)
-    content = models.TextField()
+    content = models.TextField(blank=True)
+    # Assistant rows: [{"id", "name", "args"}] so UIs can redraw tool cards.
+    tool_calls = models.JSONField(default=list, blank=True)
+    # Tool rows: the assistant tool call this result answers.
+    tool_call_id = models.CharField(max_length=128, blank=True, default="")
     external_id = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True)
 
